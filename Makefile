@@ -4,17 +4,21 @@ VITASDK ?= /usr/local/vitasdk
 export PATH := $(VITASDK)/bin:$(PATH)
 
 CC      := arm-vita-eabi-gcc
-TARGET  := tweebbo
+TARGET  ?= tweebbo
+TITLE_ID ?= TWEE00001
+APP_NAME ?= Tweebbo Showcase
 
 APP_VERSION := $(shell cat VERSION)
 CFLAGS  := -std=gnu11 -O2 -Wall -ffunction-sections -fdata-sections \
            -I source -I $(VITASDK)/arm-vita-eabi/include -D_GNU_SOURCE \
            -DSCREEN_W=480 -DSCREEN_H=272 -DTWEEBBO_DEVICE=3 \
-           -DAPP_VERSION='"$(APP_VERSION)"'
+           -DAPP_VERSION='"$(APP_VERSION)"' $(EXTRA_CFLAGS)
 LDFLAGS := -Wl,-q -Wl,--gc-sections
 
+BUILD ?= build
+
 SRC := $(wildcard source/*.c) $(wildcard source/gen/*.c) $(wildcard source/vita/*.c)
-OBJ := $(addprefix build/,$(notdir $(SRC:.c=.o)))
+OBJ := $(addprefix $(BUILD)/,$(notdir $(SRC:.c=.o)))
 
 STUBS := -lSceDisplay_stub -lSceGxm_stub -lSceCtrl_stub -lSceTouch_stub -lSceNet_stub -lSceNetCtl_stub \
          -lSceSysmodule_stub -lSceIofilemgr_stub -lSceProcessmgr_stub -lSceKernelThreadMgr_stub \
@@ -26,34 +30,34 @@ SCE_SYS := sce_sys/icon0.png sce_sys/livearea/contents/bg.png sce_sys/livearea/c
 
 all: out/$(TARGET).vpk
 
-build:
-	@mkdir -p build
+$(BUILD):
+	@mkdir -p $(BUILD)
 
-build/%.o: source/%.c | build
+$(BUILD)/%.o: source/%.c | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-build/%.o: source/gen/%.c | build
+$(BUILD)/%.o: source/gen/%.c | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-build/%.o: source/vita/%.c | build
+$(BUILD)/%.o: source/vita/%.c | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-build/$(TARGET).elf: $(OBJ)
+$(BUILD)/$(TARGET).elf: $(OBJ)
 	$(CC) $(LDFLAGS) -o $@ $(OBJ) $(LIBS)
 
 # All furniture textures in one file: VitaShell then copies ~35 files instead of ~1.900.
 romfs/furni.pak: $(wildcard romfs/furni/*.png)
 	python3 tools/pack-furni.py
 
-out/$(TARGET).vpk: build/$(TARGET).elf $(SCE_SYS) romfs/furni.pak
-	vita-elf-create build/$(TARGET).elf build/$(TARGET).velf
-	vita-make-fself -c build/$(TARGET).velf build/eboot.bin
-	vita-mksfoex -s TITLE_ID=TWEE00001 "Tweebbo Showcase" build/param.sfo
+out/$(TARGET).vpk: $(BUILD)/$(TARGET).elf $(SCE_SYS) romfs/furni.pak
+	vita-elf-create $(BUILD)/$(TARGET).elf $(BUILD)/$(TARGET).velf
+	vita-make-fself -c $(BUILD)/$(TARGET).velf $(BUILD)/eboot.bin
+	vita-mksfoex -s TITLE_ID=$(TITLE_ID) "$(APP_NAME)" $(BUILD)/param.sfo
 	@mkdir -p out
-	python3 tools/pack-vpk.py $@ build/param.sfo build/eboot.bin
+	python3 tools/pack-vpk.py $@ $(BUILD)/param.sfo $(BUILD)/eboot.bin
 	@ls -la $@
 
 clean:
-	rm -rf build out $(TARGET).elf $(TARGET).velf $(TARGET).vpk romfs/furni.pak
+	rm -rf build build-offline out $(TARGET).elf $(TARGET).velf $(TARGET).vpk romfs/furni.pak
 
 .PHONY: all clean

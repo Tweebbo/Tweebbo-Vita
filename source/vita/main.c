@@ -17,7 +17,13 @@
 #include "show.h"
 #include "world.h"
 
+#ifdef TWEEBBO_FORCE_OFFLINE
+/* Diagnostic build: boots into the local simulation (no sockets at all) so a
+   launch failure can be attributed to the graphics layer or to networking. */
+#define DATA_DIR "ux0:data/Tweebbo-offline"
+#else
 #define DATA_DIR "ux0:data/Tweebbo"
+#endif
 
 /* Parameters baked into the eboot by vita-elf-create. Explicit values remove the
    two classic launch-crash traps: the default pthread stack is only 32 KB (too
@@ -133,6 +139,10 @@ int main(void) {
     return 1;
   }
   show_set_platform("PlayStation Vita", "Hello from PlayStation Vita!");
+#ifdef TWEEBBO_FORCE_OFFLINE
+  store_save("server", "offline");
+  dbg_log("diagnostic build: local simulation, no network");
+#endif
   dbg_log("net: init");
   char neterr[128];
   conn_global_init(neterr, sizeof neterr);
