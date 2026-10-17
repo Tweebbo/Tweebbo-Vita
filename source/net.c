@@ -34,11 +34,11 @@ static void *trampoline(void *fn) { ((void (*)(void *))fn)(NULL); return NULL; }
 static ThreadHandle spawn(void (*fn)(void *)) {
   pthread_t *t = malloc(sizeof *t);
   if (!t) return NULL;
-  /* DNS and the TLS handshake need a real stack: give the thread threads 256 KB
-     instead of relying on the SDK default. */
+  /* DNS and the TLS handshake need a real stack: give the thread threads 512 KB
+     instead of relying on the SDK default (32 KB). */
   pthread_attr_t attr;
   pthread_attr_init(&attr);
-  pthread_attr_setstacksize(&attr, 256 * 1024);
+  pthread_attr_setstacksize(&attr, 512 * 1024);
   pthread_create(t, &attr, trampoline, (void *)fn);
   pthread_attr_destroy(&attr);
   return t;

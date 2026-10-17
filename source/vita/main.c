@@ -19,10 +19,15 @@
 
 #define DATA_DIR "ux0:data/Tweebbo"
 
-/* Default stack of every pthread this app creates (network and HTTP threads).
-   The VitaSDK default is too small for getaddrinfo plus the mbedTLS handshake;
-   the SDK resolves this weak symbol when the app defines it. */
-unsigned int _pthread_stack_default_user = 0x40000; /* 256 KB */
+/* Parameters baked into the eboot by vita-elf-create. Explicit values remove the
+   two classic launch-crash traps: the default pthread stack is only 32 KB (too
+   small for the TLS handshake) and an undersized main-thread stack aborts during
+   the atlas decode. The newlib heap is requested explicitly so malloc never
+   starts empty if the loader refuses its default request. `used` keeps them in
+   the ELF despite --gc-sections. */
+__attribute__((used)) unsigned int sceUserMainThreadStackSize = 0x40000;  /* 256 KB */
+__attribute__((used)) unsigned int _pthread_stack_default_user = 0x80000; /* 512 KB */
+__attribute__((used)) unsigned int _newlib_heap_size_user = 64 * 1024 * 1024; /* 64 MB */
 
 u64 now_ms(void) { return sceKernelGetProcessTimeWide() / 1000; }
 int rnd_range(int lo, int hi) { return hi <= lo ? lo : lo + (int)((u32)rand() % (u32)(hi - lo)); }
@@ -116,6 +121,8 @@ int main(void) {
   data_mkdir();
   log_start();
   dbg_log("Tweebbo Vita showcase starting (v%s)", APP_VERSION);
+  dbg_log("loader: main stack 0x%X, pthread stack 0x%X, newlib heap %u MB",
+          sceUserMainThreadStackSize, _pthread_stack_default_user, _newlib_heap_size_user / (1024 * 1024));
   srand((unsigned)sceKernelGetProcessTimeWide());
   sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG_WIDE);
   sceTouchSetSamplingState(SCE_TOUCH_PORT_FRONT, SCE_TOUCH_SAMPLING_STATE_START);
