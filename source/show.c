@@ -52,7 +52,9 @@ static struct {
   float bx0, by0, bx1, by1;
   Bubble chat[BUBBLE_MAX];
   u64 last_shift, last_frame, joined_at;
-  const char *platform, *hello;
+  const char *platform, *hello, *offline_key;
+  /* "Play offline" pill of the connection screen (touch target), in canvas pixels. */
+  float pill_x, pill_y, pill_w, pill_h;
   bool quit;
   /* Showcase cast. */
   int cast;
@@ -62,7 +64,7 @@ static struct {
 /* Zoom 1 on the half-resolution canvas is the classic 64×32 tile shown at 2× on screen:
    the whole lobby and everyone in it fit, which is what the cross-play photo needs.
    R zooms in to 2 for close-ups. */
-} V = {.zoom = 1, .platform = "Console", .hello = "Hello from the hotel!"};
+} V = {.zoom = 1, .platform = "Console", .hello = "Hello from the hotel!", .offline_key = "Select"};
 
 /* Short notice pill shown under the banner (hotel notices, kicks). */
 static char toast[128];
@@ -80,6 +82,8 @@ void show_set_platform(const char *name, const char *hello) {
   V.platform = name;
   V.hello = hello;
 }
+
+void show_set_offline_key(const char *key) { V.offline_key = key; }
 
 bool show_quit_requested(void) { return V.quit; }
 
@@ -108,7 +112,8 @@ void show_start(u64 now) {
 }
 
 static void showcase_update(u64 now) {
-  if (!net_online() || !W.in_room) return;
+  // Online or in the offline simulation (same protocol): the cast keeps rotating either way.
+  if (!W.in_room || !(net_online() || net_state() == NET_OFFLINE)) return;
   if (now >= V.next_look) {
     V.next_look = now + LOOK_MS;
     V.cast = (V.cast + 1) % COUNT(CAST);
@@ -468,7 +473,8 @@ static void draw_ui(u64 now) {
   float tw = text_width(line, 13);
   fill_round(SCREEN_W / 2 - tw / 2 - 8, 6, tw + 16, 20, 4, rgba(0x0b0d0e, 200));
   text_draw(line, SCREEN_W / 2, 9, 13, rgb(0xffd166, 255), 1);
-  snprintf(line, sizeof line, "Model: %s", CAST_NAME[V.cast]);
+  if (net_state() == NET_OFFLINE) snprintf(line, sizeof line, "Model: %s - offline (%s: hotel)", CAST_NAME[V.cast], V.offline_key);
+  else snprintf(line, sizeof line, "Model: %s", CAST_NAME[V.cast]);
   text_draw(line, SCREEN_W / 2, 28, 11, rgb(0x8fd9ff, 255), 1);
 
   /* Classic bottom bar. */
@@ -536,9 +542,23 @@ void show_frame(u64 now) {
                         : state == NET_LOCKED ? "This room is locked"
                         : state == NET_DENIED ? "Connection paused"
                         : net_status()[0] ? net_status() : "Connecting...";
-    text_draw("Tweebbo", SCREEN_W / 2, SCREEN_H / 2 - 34, 16, rgb(0xffd166, 255), 1);
-    text_draw(status, SCREEN_W / 2, SCREEN_H / 2 - 10, 13, rgb(0xeceae2, 255), 1);
-    text_draw(V.platform, SCREEN_W / 2, SCREEN_H / 2 + 14, 11, rgb(0x8fd9ff, 255), 1);
+    char line[160];
+    text_draw("Tweebbo", SCREEN_W / 2, SCREEN_H / 2 - 50, 16, rgb(0xffd166, 255), 1);
+    snprintf(line, sizeof line, "%s", status);
+    text_fit(line, 13, SCREEN_W - 20);
+    text_draw(line, SCREEN_W / 2, SCREEN_H / 2 - 26, 13, rgb(0xeceae2, 255), 1);
+    if (state != NET_OFFLINE) {
+      snprintf(line, sizeof line, "Hotel: %s", net_server());
+      text_fit(line, 11, SCREEN_W - 20);
+      text_draw(line, SCREEN_W / 2, SCREEN_H / 2 - 4, 11, rgb(0x8fd9ff, 255), 1);
+      /* No hotel on this Wi-Fi: the same build plays offline (the local simulation with bots). */
+      snprintf(line, sizeof line, "%s - play offline", V.offline_key);
+      float w = text_width(line, 12) + 24;
+      V.pill_x = SCREEN_W / 2 - w / 2; V.pill_y = SCREEN_H / 2 + 20; V.pill_w = w; V.pill_h = 22;
+      fill_round(V.pill_x, V.pill_y, w, 22, 11, rgb(0x7fcf55, 255));
+      text_draw(line, SCREEN_W / 2, SCREEN_H / 2 + 24, 12, rgb(0x000000, 255), 1);
+    }
+    text_draw(V.platform, SCREEN_W / 2, SCREEN_H / 2 + 54, 11, rgb(0x8fd9ff, 255), 1);
     return;
   }
   camera(now);
@@ -619,7 +639,12 @@ void show_walk(int dx, int dy) {
 }
 
 void show_tap(float x, float y) {
-  if (!W.in_room) return;
+  if (!W.in_room) {
+    if (net_state() != NET_OFFLINE && V.pill_w > 0 && x >= V.pill_x - 6 && x <= V.pill_x + V.pill_w + 6 &&
+        y >= V.pill_y - 6 && y <= V.pill_y + V.pill_h + 6)
+      show_action(SHOW_OFFLINE);
+    return;
+  }
   float sx = x / V.zoom - roundf(V.cam_x), sy = y / V.zoom - roundf(V.cam_y);
   int tx = (int)lroundf((sx / HALF_W + sy / HALF_H) / 2);
   int ty = (int)lroundf((sy / HALF_H - sx / HALF_W) / 2);
@@ -689,7 +714,8 @@ void show_action(int action) {
     case SHOW_L: V.zoom = 1; V.snapped = false; break;
     case SHOW_R: V.zoom = 2; V.snapped = false; break;
     case SHOW_OFFLINE:
-      net_set_server(strcmp(net_server(), "offline") ? "offline" : PROD_SERVER);
+      /* The proof of concept only knows the hotel of the local network it was built for. */
+      net_set_server(strcmp(net_server(), "offline") ? "offline" : DEFAULT_SERVER);
       break;
   }
 }

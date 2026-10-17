@@ -9,9 +9,11 @@ character. It is the base to grow the full port (see
 
 ## What it does
 
-- **Online**: WebSocket over TLS (mbedTLS) to `wss://tweebbo.lol` (or another server), protocol v6,
-  with the same reconnection and renewal as the 3DS client. `HELLO` carries `platform = 1` plus
-  the trailing device byte `3` (Vita).
+- **Local hotel only**: this proof of concept never talks to `tweebbo.lol`. It plays on the hotel
+  of the Wi-Fi it was built for: `./build.sh` bakes in `ws://<this PC's LAN IP>:8096` (or
+  `TWEEBBO_SERVER`), and only private LAN `ws://` addresses are accepted (a `server.txt` with
+  anything else is ignored). Protocol v6 with the same reconnection as the 3DS client; `HELLO`
+  carries `platform = 1` plus the trailing device byte `3` (Vita).
 - **Room**: isometric rendering at a 2× integer canvas (480×272 logical on the 960×544 screen),
   room background or layered public room, furniture with its own textures (LRU cache), avatars
   composed with the shared compositor, chat bubbles and the classic bottom bar.
@@ -20,8 +22,9 @@ character. It is the base to grow the full port (see
   model. Every console and the web see the same character change.
 - **Cross-play**: the server announces each native device (`s2c DEVICE`); the pixel-art badge of
   the 3DS, the Switch and the Vita floats over the players.
-- **Offline**: Select switches to the local simulation (bots in the lobby) for photos without
-  Wi-Fi; Select again returns to the server.
+- **Offline in the same build**: when the hotel does not answer, the connection screen offers
+  **Select - play offline** (also a tap on it): the local simulation with bots in the lobby, where the
+  models keep rotating. Select again goes back to the hotel. Every launch tries the hotel first.
 
 ## Controls
 
@@ -33,7 +36,7 @@ character. It is the base to grow the full port (see
 | Triangle | Quick chat ("Hello from PlayStation Vita!") |
 | Circle | Next showcase model |
 | L / R | Zoom 1× (whole room, default) / 2× (close-up) |
-| Select | Offline simulation on/off |
+| Select | Play offline / back to the hotel |
 | Start | Quit |
 | Front touch | Walk to the tapped tile (also works on PS TV with a controller only) |
 
@@ -52,10 +55,12 @@ Install: copy `out/tweebbo.vpk` to the console (`ux0:` via VitaShell USB/FTP), o
 VitaShell and install. Settings and the character token live in `ux0:data/Tweebbo/`
 (`server.txt`, `room.txt`, `token-<server>.txt` — **private** — and `log.txt`).
 
-To play against a local hotel (the same one the 3DS debug uses):
+The hotel is the showcase hotel of this PC (`~/Tweebbo-Showcase-2026-10-17/INSTALL.md`, port
+8096). If the PC's address changes, rebuild, or point a console at the new one without rebuilding
+(private LAN `ws://` addresses only):
 
 ```bash
-printf 'ws://192.168.1.20:8092' > /path/to/ux0/data/Tweebbo/server.txt
+printf 'ws://192.168.1.20:8096' > /path/to/ux0/data/Tweebbo/server.txt
 ```
 
 ## Layout

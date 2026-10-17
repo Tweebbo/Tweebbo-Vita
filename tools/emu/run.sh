@@ -19,5 +19,5 @@ rm -f "$UX0/data/$DATA/log.txt"
 [ -n "${ROOM:-}" ] && printf '%s\n' "$ROOM" > "$UX0/data/$DATA/room.txt"
 timeout $(( ${SECONDS_RUN:-40} + 120 )) podman run --rm --network host -v "$ROOT":"$ROOT":z -w "$ROOT" \
   -e CACHE="$CACHE" -e VPK="$VPK" -e TITLE="$TITLE" -e SECONDS_RUN="${SECONDS_RUN:-40}" -e SHOTS="${SHOTS:-10 20 30}" \
-  -e KEYS="${KEYS:-}" tweebbo-3ds-emu bash "$ROOT/tools/emu/session.sh"
+  -e KEYS="${KEYS:-}" -e CLICKS="${CLICKS:-}" tweebbo-3ds-emu bash "$ROOT/tools/emu/session.sh"
 echo "--- app log"; cat "$UX0/data/$DATA/log.txt" 2>/dev/null || echo "(no log)"

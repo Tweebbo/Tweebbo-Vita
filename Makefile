@@ -9,9 +9,12 @@ TITLE_ID ?= TWEE00001
 APP_NAME ?= Tweebbo Showcase
 
 APP_VERSION := $(shell cat VERSION)
+# The hotel on the local network this proof of concept plays on (set by build.sh).
+TWEEBBO_SERVER ?= $(error Set TWEEBBO_SERVER, e.g. ws://192.168.1.20:8096 (use ./build.sh))
 CFLAGS  := -std=gnu11 -O2 -Wall -ffunction-sections -fdata-sections \
            -I source -I $(VITASDK)/arm-vita-eabi/include -D_GNU_SOURCE \
            -DSCREEN_W=480 -DSCREEN_H=272 -DTWEEBBO_DEVICE=3 \
+           -DTWEEBBO_LAN_ONLY=1 -DDEFAULT_SERVER='"$(TWEEBBO_SERVER)"' \
            -DAPP_VERSION='"$(APP_VERSION)"' $(EXTRA_CFLAGS)
 LDFLAGS := -Wl,-q -Wl,--gc-sections
 
@@ -33,13 +36,17 @@ all: out/$(TARGET).vpk
 $(BUILD):
 	@mkdir -p $(BUILD)
 
-$(BUILD)/%.o: source/%.c | $(BUILD)
+# Rebuild everything when the baked hotel address changes.
+$(BUILD)/server.stamp: FORCE | $(BUILD)
+	@echo '$(TWEEBBO_SERVER)' | cmp -s - $@ || echo '$(TWEEBBO_SERVER)' > $@
+
+$(BUILD)/%.o: source/%.c $(BUILD)/server.stamp | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD)/%.o: source/gen/%.c | $(BUILD)
+$(BUILD)/%.o: source/gen/%.c $(BUILD)/server.stamp | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD)/%.o: source/vita/%.c | $(BUILD)
+$(BUILD)/%.o: source/vita/%.c $(BUILD)/server.stamp | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD)/$(TARGET).elf: $(OBJ)
@@ -58,6 +65,6 @@ out/$(TARGET).vpk: $(BUILD)/$(TARGET).elf $(SCE_SYS) romfs/furni.pak
 	@ls -la $@
 
 clean:
-	rm -rf build build-offline out $(TARGET).elf $(TARGET).velf $(TARGET).vpk romfs/furni.pak
+	rm -rf build out $(TARGET).elf $(TARGET).velf $(TARGET).vpk romfs/furni.pak
 
-.PHONY: all clean
+.PHONY: all clean FORCE

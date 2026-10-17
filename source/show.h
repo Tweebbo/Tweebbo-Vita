@@ -6,6 +6,8 @@
 
 /** Set by the platform main (used by the banner and the quick chat). */
 void show_set_platform(const char *name, const char *hello);
+/** Name of the button that toggles the offline simulation, for the on-screen hints. */
+void show_set_offline_key(const char *key);
 
 void show_start(u64 now);
 void show_frame(u64 now);
