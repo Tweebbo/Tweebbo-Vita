@@ -1,0 +1,58 @@
+# Tweebbo for PlayStation Vita (showcase proof of concept).
+# Build with ./build.sh (uses the vitasdk/vitasdk container).
+VITASDK ?= /usr/local/vitasdk
+export PATH := $(VITASDK)/bin:$(PATH)
+
+CC      := arm-vita-eabi-gcc
+TARGET  := tweebbo
+
+APP_VERSION := $(shell cat VERSION)
+CFLAGS  := -std=gnu11 -O2 -Wall -ffunction-sections -fdata-sections \
+           -I source -I $(VITASDK)/arm-vita-eabi/include -D_GNU_SOURCE \
+           -DSCREEN_W=480 -DSCREEN_H=272 -DTWEEBBO_DEVICE=3 \
+           -DAPP_VERSION='"$(APP_VERSION)"'
+LDFLAGS := -Wl,-q -Wl,--gc-sections
+
+SRC := $(wildcard source/*.c) $(wildcard source/gen/*.c) $(wildcard source/vita/*.c)
+OBJ := $(addprefix build/,$(notdir $(SRC:.c=.o)))
+
+# Newlib already provides the C library; these stubs redefine it.
+STUBS := $(filter-out %libSceLibc_stub.a %libSceStdio_0931_stub.a %libSceSysclibForDriver_stub.a,$(wildcard $(VITASDK)/arm-vita-eabi/lib/libSce*_stub.a))
+LIBS  := -Wl,--start-group $(STUBS) -lvita2d -lmbedtls -lmbedx509 -lmbedcrypto -lpng -ljpeg -lz -lpthread -lm -Wl,--end-group
+
+SCE_SYS := sce_sys/icon0.png sce_sys/livearea/contents/bg.png sce_sys/livearea/contents/startup.png \
+           sce_sys/livearea/contents/template.xml
+
+all: out/$(TARGET).vpk
+
+build:
+	@mkdir -p build
+
+build/%.o: source/%.c | build
+	$(CC) $(CFLAGS) -c $< -o $@
+
+build/%.o: source/gen/%.c | build
+	$(CC) $(CFLAGS) -c $< -o $@
+
+build/%.o: source/vita/%.c | build
+	$(CC) $(CFLAGS) -c $< -o $@
+
+build/$(TARGET).elf: $(OBJ)
+	$(CC) $(LDFLAGS) -o $@ $(OBJ) $(LIBS)
+
+# All furniture textures in one file: VitaShell then copies ~35 files instead of ~1.900.
+romfs/furni.pak: $(wildcard romfs/furni/*.png)
+	python3 tools/pack-furni.py
+
+out/$(TARGET).vpk: build/$(TARGET).elf $(SCE_SYS) romfs/furni.pak
+	vita-elf-create build/$(TARGET).elf build/$(TARGET).velf
+	vita-make-fself -c build/$(TARGET).velf build/eboot.bin
+	vita-mksfoex -s TITLE_ID=TWEE00001 "Tweebbo Showcase" build/param.sfo
+	@mkdir -p out
+	python3 tools/pack-vpk.py $@ build/param.sfo build/eboot.bin
+	@ls -la $@
+
+clean:
+	rm -rf build out $(TARGET).elf $(TARGET).velf $(TARGET).vpk romfs/furni.pak
+
+.PHONY: all clean

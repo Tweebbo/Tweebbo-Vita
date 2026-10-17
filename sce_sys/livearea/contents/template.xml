@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<livearea style="a1" format-ver="01.00" content-rev="1">
+  <livearea-background>
+    <image>bg.png</image>
+  </livearea-background>
+  <gate>
+    <startup-image>startup.png</startup-image>
+  </gate>
+  <frame id="frame1">
+    <liveitem>
+      <text align="center">Tweebbo Showcase</text>
+      <text align="center">PlayStation Vita proof of concept</text>
+    </liveitem>
+    <liveitem>
+      <text align="center">Same hotel as tweebbo.lol, the 3DS and the Switch</text>
+    </liveitem>
+  </frame>
+</livearea>
