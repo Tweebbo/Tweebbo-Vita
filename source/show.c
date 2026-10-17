@@ -57,6 +57,8 @@ static struct {
   /* Showcase cast. */
   int cast;
   u64 next_look, next_gesture, next_walk;
+  /* One-shot checkpoints: the log pins the stage that faults the GPU. */
+  bool log_room_info, log_stage_world, log_stage_frame;
 } V = {.zoom = 2, .platform = "Console", .hello = "Hello from the hotel!"};
 
 /* Short notice pill shown under the banner (hotel notices, kicks). */
@@ -412,6 +414,7 @@ void show_room_changed(u64 now) {
   for (int i = 0; i < MAX_ITEMS; i++) if (W.items[i].used) gfx_furni_preload(W.items[i].def);
   V.snapped = false;
   V.joined_at = now;
+  V.log_room_info = V.log_stage_world = V.log_stage_frame = true;
 }
 
 // ------------------------------------------------------------------ interface
@@ -544,6 +547,14 @@ void show_frame(u64 now) {
       }
   } else if (V.bg) gfx_room_draw(V.bg, scr_x(V.bg->x), scr_y(V.bg->y), V.zoom);
   else fallback_floor();
+  if (V.log_room_info) {
+    V.log_room_info = false;
+    int items = 0, ents = 0;
+    for (int i = 0; i < MAX_ITEMS; i++) items += W.items[i].used;
+    for (int i = 0; i < MAX_ENTS; i++) ents += W.ents[i].used;
+    dbg_log("room: %s model=%s %dx%d bg=%s items=%d ents=%d", W.slug, W.model, W.w, W.h,
+            V.scene ? "scene" : V.bg ? "background" : "fallback-floor", items, ents);
+  }
 
   static Drawable list[4096];
   int n = 0;
@@ -588,8 +599,10 @@ void show_frame(u64 now) {
     else if (list[i].layer) gfx_scene_sprite(list[i].layer, scr_x(list[i].layer->x), scr_y(list[i].layer->y), V.zoom, list[i].layer->alpha);
     else draw_item_part(list[i].item, list[i].part);
   }
+  if (V.log_stage_world) { V.log_stage_world = false; dbg_log("room: world drawn (%d pieces)", n); }
   draw_bubbles(now);
   draw_ui(now);
+  if (V.log_stage_frame) { V.log_stage_frame = false; dbg_log("room: first frame drawn"); }
   V.last_frame = now;
 }
 

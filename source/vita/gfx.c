@@ -154,7 +154,7 @@ void gfx_present(void) { vita2d_end_drawing(); vita2d_swap_buffers(); }
 
 static void draw_tex(vita2d_texture *t, int sx, int sy, int sw, int sh, float x, float y, float kx, float ky, bool flip,
                      u32 color) {
-  if (!t) return;
+  if (!t || sw <= 0 || sh <= 0 || kx == 0 || ky == 0) return;
   float dx = x * S, dy = y * S, ax = kx * S, ay = ky * S;
   if (flip) {
     /* Negative x scale mirrors the quad; adjust the origin so the sprite stays in place. */
@@ -304,6 +304,7 @@ void gfx_additive(bool on) { additive = on; }
 // ------------------------------------------------------------------ primitives
 
 void fill_rect(float x, float y, float w, float h, u32 color) {
+  if (w <= 0 || h <= 0) return;
   vita2d_draw_rectangle(x * S, y * S, w * S, h * S, color);
 }
 

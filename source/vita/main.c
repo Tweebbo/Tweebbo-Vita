@@ -126,7 +126,7 @@ static void input(SceCtrlData *pad, unsigned prev, bool *running) {
 int main(void) {
   data_mkdir();
   log_start();
-  dbg_log("Tweebbo Vita showcase starting (v%s)", APP_VERSION);
+  dbg_log("Tweebbo Vita showcase starting (v%s, build %s %s)", APP_VERSION, __DATE__, __TIME__);
   dbg_log("loader: main stack 0x%X, pthread stack 0x%X, newlib heap %u MB",
           sceUserMainThreadStackSize, _pthread_stack_default_user, _newlib_heap_size_user / (1024 * 1024));
   srand((unsigned)sceKernelGetProcessTimeWide());
