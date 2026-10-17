@@ -19,6 +19,11 @@
 
 #define DATA_DIR "ux0:data/Tweebbo"
 
+/* Default stack of every pthread this app creates (network and HTTP threads).
+   The VitaSDK default is too small for getaddrinfo plus the mbedTLS handshake;
+   the SDK resolves this weak symbol when the app defines it. */
+unsigned int _pthread_stack_default_user = 0x40000; /* 256 KB */
+
 u64 now_ms(void) { return sceKernelGetProcessTimeWide() / 1000; }
 int rnd_range(int lo, int hi) { return hi <= lo ? lo : lo + (int)((u32)rand() % (u32)(hi - lo)); }
 
@@ -130,6 +135,8 @@ int main(void) {
 
   bool running = true;
   unsigned prev = 0;
+  bool first_frame = true;
+  u64 last_beat = now_ms();
   while (running) {
     SceCtrlData pad;
     memset(&pad, 0, sizeof pad);
@@ -147,6 +154,11 @@ int main(void) {
     gfx_begin();
     show_frame(now_ms());
     gfx_present();
+    if (first_frame) { first_frame = false; dbg_log("frame 1 ok"); }
+    if (now - last_beat > 30000) {
+      last_beat = now;
+      dbg_log("alive: in_room=%d online=%d", W.in_room ? 1 : 0, net_online() ? 1 : 0);
+    }
     if (show_quit_requested()) running = false;
   }
 
