@@ -15,6 +15,7 @@
 #include <psp2/kernel/processmgr.h>
 #include <psp2/net/net.h>
 #include <psp2/net/netctl.h>
+#include <psp2/sysmodule.h>
 
 #ifndef NO_TLS
 #include <mbedtls/ctr_drbg.h>
@@ -101,16 +102,23 @@ static bool tls_init(char *err, int err_cap) {
 bool conn_global_init(char *err, int err_cap) {
   err[0] = 0;
   if (!sockets_ready) {
+    /* The Net module must be loaded explicitly before sceNetInit (never from the
+       network thread: sockets are initialised on the main thread and only then
+       does net_start() create the threads). */
+    int r = sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
+    dbg_log("net: Sysmodule NET %s (0x%08X)", r >= 0 ? "ok" : "FAILED", (unsigned)r);
     static char net_mem[1024 * 1024] __attribute__((aligned(16)));
     static SceNetInitParam param;
     param.memory = net_mem;
     param.size = sizeof net_mem;
     param.flags = 0;
-    if (sceNetInit(&param) < 0) {
-      snprintf(err, (size_t)err_cap, "Network service unavailable. Is Wi-Fi on?");
+    r = sceNetInit(&param);
+    if (r < 0) {
+      snprintf(err, (size_t)err_cap, "sceNetInit failed (0x%08X). Is Wi-Fi on?", (unsigned)r);
       return false;
     }
-    sceNetCtlInit();
+    r = sceNetCtlInit();
+    dbg_log("net: sceNetCtlInit %s (0x%08X)", r >= 0 ? "ok" : "FAILED", (unsigned)r);
     sockets_ready = true;
   }
   return true;
