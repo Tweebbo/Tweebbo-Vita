@@ -21,7 +21,8 @@ and the Switch.
   - Never write settings anywhere except `ux0:data/Tweebbo/`; tokens stay private.
 - **Verification**: `./build.sh` must produce `out/tweebbo.vpk` from a clean tree. The VPK is
   built with `ZIP_STORED` and the furniture inside `romfs/furni.pak` (29 files, quick to install
-  in VitaShell); keep it that way unless a measurement says otherwise. Cross-play check against
-  a local hotel with the updated server:
+  in VitaShell); keep it that way unless a measurement says otherwise. The `sce_sys` /
+  LiveArea images **must be 8-bit indexed PNGs** (`tools/make-sce_sys.py`): 24-bit ones fail the
+  install with `0x8010113D`. Cross-play check against a local hotel with the updated server:
   `TWEEBBO_URL=ws://127.0.0.1:8092 node ../Tweebbo-Vercel/tests/device-announcement.mjs`.
 - Never log, show or commit player tokens (`token-*.txt`), private codes or production data.

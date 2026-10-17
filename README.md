@@ -74,6 +74,9 @@ romfs/             PNG assets fetched from the 3DS export (gfx/ and furni/)
 
 ## Notes
 
+- **LiveArea images must be 8-bit indexed PNGs** (the promoter rejects 24-bit ones with install
+  error `0x8010113D`): `tools/make-sce_sys.py` regenerates `sce_sys/` quantised; run it after
+  changing `assets/icon.jpg` and before `./build.sh`.
 - **Fast-install VPK**: the package is built with `ZIP_STORED` (VitaShell copies instead of
   inflating) and the 1909 furniture textures travel inside a single `furni.pak` read on demand
   (`tools/pack-furni.py`), so the VPK carries 29 files instead of 1937. That is what made the
