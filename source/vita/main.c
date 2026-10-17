@@ -121,9 +121,11 @@ int main(void) {
     return 1;
   }
   show_set_platform("PlayStation Vita", "Hello from PlayStation Vita!");
+  dbg_log("net: init");
   char neterr[128];
   conn_global_init(neterr, sizeof neterr);
   net_start(now_ms());
+  dbg_log("net: started, entering the loop");
   show_start(now_ms());
 
   bool running = true;

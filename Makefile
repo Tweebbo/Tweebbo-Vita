@@ -16,8 +16,9 @@ LDFLAGS := -Wl,-q -Wl,--gc-sections
 SRC := $(wildcard source/*.c) $(wildcard source/gen/*.c) $(wildcard source/vita/*.c)
 OBJ := $(addprefix build/,$(notdir $(SRC:.c=.o)))
 
-# Newlib already provides the C library; these stubs redefine it.
-STUBS := $(filter-out %libSceLibc_stub.a %libSceStdio_0931_stub.a %libSceSysclibForDriver_stub.a,$(wildcard $(VITASDK)/arm-vita-eabi/lib/libSce*_stub.a))
+STUBS := -lSceDisplay_stub -lSceGxm_stub -lSceCtrl_stub -lSceTouch_stub -lSceNet_stub -lSceNetCtl_stub \
+         -lSceSysmodule_stub -lSceIofilemgr_stub -lSceProcessmgr_stub -lSceKernelThreadMgr_stub \
+         -lSceCommonDialog_stub -lSceAppMgr_stub -lSceAppUtil_stub -lSceMotion_stub
 LIBS  := -Wl,--start-group $(STUBS) -lvita2d -lmbedtls -lmbedx509 -lmbedcrypto -lpng -ljpeg -lz -lpthread -lm -Wl,--end-group
 
 SCE_SYS := sce_sys/icon0.png sce_sys/livearea/contents/bg.png sce_sys/livearea/contents/startup.png \

@@ -79,13 +79,16 @@ static vita2d_texture *furni_blob(u16 def, u16 page) {
 }
 
 bool gfx_init(void) {
+  dbg_log("gfx: vita2d_init...");
   vita2d_init();
   vita2d_set_clear_color(RGBA8(0x0b, 0x0d, 0x0e, 255));
+  dbg_log("gfx: vita2d ready");
   static const char *pages[ATLAS_PAGES] = {"atlas0", "atlasg0", "atlasg1", "atlasg2", "atlasg3"};
   for (int i = 0; i < ATLAS_PAGES; i++) {
     char path[64];
     snprintf(path, sizeof path, "app0:gfx/%s.png", pages[i]);
     atlas[i] = load_png(path);
+    dbg_log("gfx: %s %s", pages[i], atlas[i] ? "ok" : "missing");
     if (!atlas[i] && i == 0) return false;
   }
   font_tex = load_png("app0:gfx/font0.png");
