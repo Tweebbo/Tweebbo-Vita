@@ -32,7 +32,7 @@ character. It is the base to grow the full port (see
 | Square | Wave |
 | Triangle | Quick chat ("Hello from PlayStation Vita!") |
 | Circle | Next showcase model |
-| L / R | Zoom 1× / 2× |
+| L / R | Zoom 1× (whole room, default) / 2× (close-up) |
 | Select | Offline simulation on/off |
 | Start | Quit |
 | Front touch | Walk to the tapped tile (also works on PS TV with a controller only) |
@@ -66,7 +66,7 @@ source/            shared C11 core (also compiled by the Switch client)
   gen/             generated tables from tools/pack.py (assets.c, font.c)
   vita/            PlayStation Vita platform layer
     conn.c         SceNet sockets + mbedTLS (entropy from the process clock)
-    gfx.c          vita2d renderer (2× canvas, nearest, LRU furniture cache)
+    gfx.c          vita2d renderer (2× canvas, nearest, furniture cache, frame sync)
     main.c         SceCtrl and SceTouch input, ux0:data storage
 sce_sys/           LiveArea (icon0, bg, startup, template.xml)
 romfs/             PNG assets fetched from the 3DS export (gfx/ and furni/)
@@ -84,7 +84,20 @@ romfs/             PNG assets fetched from the 3DS export (gfx/ and furni/)
   compressed.
 - The assets are the same PNGs the web export produces, so the art is identical to the other
   clients.
-- The mirror for left/right facing sprites uses a negative x scale in vita2d; it is verified on
-  Vita3K during development but still needs the physical-console photo pass (OLED/LCD/PS TV).
+- **GPU lifetime (the `GPUCRASH` fix)**: `gfx_present` waits for the GPU (`sceGxmFinish`) after
+  every frame. Textures are freed between frames (room changes, furniture cache) and vita2d
+  rewinds its vertex pool at the start of each frame; doing either while the GPU still read the
+  previous frame is what powered the console off with `GPUCRASH` when the lobby was drawn (the
+  64-slot furniture cache evicted textures of the frame in flight every frame). The cache now has
+  512 slots in main memory, the vertex pool is 4 MB and every draw is skipped when it runs low.
+- The mirror for left/right facing sprites uses a negative x scale in vita2d (GXM does not cull).
+- **Emulator**: `tools/emu/run.sh` runs the VPK in Vita3K inside the headless `tweebbo-3ds-emu`
+  container and saves screenshots in `build/shots` (`SERVER=ws://127.0.0.1:8096` points the app at
+  a hotel). The emulator AppImage and the official 3.74 firmware live in `tools/emu-cache/`
+  (ignored by git): download `Vita3K-x86_64.AppImage` (continuous release) and `PSVUPDAT.PUP`,
+  run `./Vita3K.AppImage --appimage-extract`, then install the firmware once with
+  `XDG_DATA_HOME=$PWD/home/share XDG_CONFIG_HOME=$PWD/home/config ./Vita3K.AppImage --firmware PSVUPDAT.PUP`
+  after setting `pref-path` in `home/config/Vita3K/config.yml` to `tools/emu-cache/home/vita/`.
+  Vita3K does not reproduce GPU faults, so the frame-sync rule above must stay.
 - Not in this proof of concept (roadmap): build mode, catalogue, inventory, friends, pets, games,
   casino, Snow Storm, audio, LiveArea updates and in-game updates.

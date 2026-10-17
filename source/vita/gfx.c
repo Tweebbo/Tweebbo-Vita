@@ -9,7 +9,13 @@
 #include "common.h"
 
 #define ATLAS_PAGES 5
-#define FURNI_CACHE 64
+/* Big enough for the busiest room (lobby_hall + players), so a frame never evicts what
+   it is about to draw. Furniture lives in main memory (4 KB granularity), not CDRAM. */
+#define FURNI_CACHE 512
+/* vita2d's per-frame vertex pool (default 1 MB). Every draw is skipped once it runs low:
+   vita2d writes the vertices through an unchecked pointer. */
+#define VERTEX_POOL (4 * 1024 * 1024)
+#define POOL_RESERVE 1024
 /* The Vita screen is 960×544: the 480×272 canvas fits it exactly at 2×. */
 #define S 2.0f
 
@@ -17,6 +23,14 @@ static vita2d_texture *atlas[ATLAS_PAGES];
 static vita2d_texture *font_tex;
 static vita2d_texture *mask_tri_up, *mask_tri_down, *mask_disc;
 static bool additive;
+static int frame_draws, frame_skipped, max_draws;
+
+/* True when there is room for one more quad in this frame's vertex pool. */
+static bool pool_ok(void) {
+  if (vita2d_pool_free_space() > POOL_RESERVE) { frame_draws++; return true; }
+  frame_skipped++;
+  return false;
+}
 
 typedef struct { u16 def; u8 page; bool used; vita2d_texture *tex; u32 stamp; } FurniTex;
 static FurniTex furni_cache[FURNI_CACHE];
@@ -35,6 +49,7 @@ static struct { vita2d_texture *tex[4]; const Scene *scene; int pages; } scene_v
 #include "stb_image.h"
 
 static vita2d_texture *texture_from_rgba(const unsigned char *px, int w, int h) {
+  if (w <= 0 || h <= 0 || w > 4096 || h > 4096) return NULL;
   vita2d_texture *t = vita2d_create_empty_texture((unsigned)w, (unsigned)h);
   if (!t) return NULL;
   unsigned char *dst = vita2d_texture_get_datap(t);
@@ -133,7 +148,10 @@ static vita2d_texture *furni_blob(u16 def, u16 page) {
         free(buf);
         return NULL;
       }
+      /* Many small textures: main memory (4 KB granularity) instead of 256 KB CDRAM blocks. */
+      vita2d_texture_set_alloc_memblock_type(SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE);
       vita2d_texture *t = decode_png(buf, pak.idx[mid].size);
+      vita2d_texture_set_alloc_memblock_type(SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW);
       free(buf);
       return t;
     }
@@ -144,7 +162,7 @@ static vita2d_texture *furni_blob(u16 def, u16 page) {
 
 bool gfx_init(void) {
   dbg_log("gfx: vita2d_init...");
-  vita2d_init();
+  vita2d_init_advanced(VERTEX_POOL);
   vita2d_set_clear_color(RGBA8(0x0b, 0x0d, 0x0e, 255));
   dbg_log("gfx: vita2d ready");
   static const char *pages[ATLAS_PAGES] = {"atlas0", "atlasg0", "atlasg1", "atlasg2", "atlasg3"};
@@ -165,6 +183,7 @@ bool gfx_init(void) {
 }
 
 void gfx_exit(void) {
+  vita2d_wait_rendering_done();
   for (int i = 0; i < ATLAS_PAGES; i++) if (atlas[i]) vita2d_free_texture(atlas[i]);
   if (font_tex) vita2d_free_texture(font_tex);
   if (mask_tri_up) vita2d_free_texture(mask_tri_up);
@@ -184,23 +203,36 @@ void gfx_frame(void) {
   for (int i = 0; i < n; i++) gfx_furni_preload(defs[i]);
 }
 
-void gfx_begin(void) { vita2d_start_drawing(); vita2d_clear_screen(); }
-void gfx_present(void) { vita2d_end_drawing(); vita2d_swap_buffers(); }
+void gfx_begin(void) {
+  frame_draws = frame_skipped = 0;
+  vita2d_start_drawing();
+  vita2d_clear_screen();
+}
+
+/* The GPU finishes every frame before the CPU continues. Between two frames the app frees
+   textures (room change, furniture cache) and vita2d rewinds its vertex pool: doing either
+   while the GPU still reads them faults the GPU (the GPUCRASH dumps). The scene is light,
+   so waiting costs nothing visible at 60 fps. */
+void gfx_present(void) {
+  vita2d_end_drawing();
+  vita2d_swap_buffers();
+  vita2d_wait_rendering_done();
+  if (frame_skipped || frame_draws > max_draws + 1000) {
+    if (frame_draws > max_draws) max_draws = frame_draws;
+    dbg_log("gfx: %d draws this frame, %d skipped (vertex pool)", frame_draws, frame_skipped);
+  }
+}
 
 static void draw_tex(vita2d_texture *t, int sx, int sy, int sw, int sh, float x, float y, float kx, float ky, bool flip,
                      u32 color) {
-  if (!t || sw <= 0 || sh <= 0 || kx == 0 || ky == 0) return;
+  if (!t || sw <= 0 || sh <= 0 || kx == 0 || ky == 0 || !pool_ok()) return;
   float dx = x * S, dy = y * S, ax = kx * S, ay = ky * S;
   if (flip) {
     /* Negative x scale mirrors the quad; adjust the origin so the sprite stays in place. */
     dx += sw * ax;
     ax = -ax;
   }
-  if (additive) {
-    vita2d_draw_texture_tint_part_scale(t, dx, dy, sx, sy, sw, sh, ax, ay, color);
-  } else {
-    vita2d_draw_texture_tint_part_scale(t, dx, dy, sx, sy, sw, sh, ax, ay, color);
-  }
+  vita2d_draw_texture_tint_part_scale(t, dx, dy, sx, sy, sw, sh, ax, ay, color);
 }
 
 void gfx_sprite(int page, int sx, int sy, int sw, int sh, float x, float y, float scale, bool flip, u32 color) {
@@ -334,17 +366,21 @@ void gfx_scene_sprite(const SceneSprite *s, float x, float y, float zoom, u8 alp
 }
 
 void gfx_filter(bool linear) { (void)linear; }
-void gfx_additive(bool on) { additive = on; }
+void gfx_additive(bool on) {
+  if (on == additive) return;
+  additive = on;
+  vita2d_set_blend_mode_add(on);
+}
 
 // ------------------------------------------------------------------ primitives
 
 void fill_rect(float x, float y, float w, float h, u32 color) {
-  if (w <= 0 || h <= 0) return;
+  if (w <= 0 || h <= 0 || !pool_ok()) return;
   vita2d_draw_rectangle(x * S, y * S, w * S, h * S, color);
 }
 
 void fill_circle(float cx, float cy, float r, u32 color) {
-  if (!mask_disc) return;
+  if (!mask_disc || r <= 0 || !pool_ok()) return;
   vita2d_draw_texture_tint_scale(mask_disc, (cx - r) * S, (cy - r) * S, (2 * r / 64.0f) * S, (2 * r / 64.0f) * S, color);
 }
 
@@ -366,7 +402,7 @@ void fill_triangle(float x1, float y1, float x2, float y2, float x3, float y3, u
   float w = xmax - xmin, h = ymax - ymin;
   if (w <= 0 || h <= 0) return;
   vita2d_texture *mask = at_min == 1 && at_max == 2 ? mask_tri_up : at_max == 1 && at_min == 2 ? mask_tri_down : mask_tri_up;
-  if (!mask) return;
+  if (!mask || !pool_ok()) return;
   vita2d_draw_texture_tint_scale(mask, xmin * S, ymin * S, (w / 64.0f) * S, (h / 32.0f) * S, color);
 }
 

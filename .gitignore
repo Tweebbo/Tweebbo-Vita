@@ -10,3 +10,5 @@ romfs/classic/
 source/gen/
 __pycache__/
 romfs/furni.pak
+tools/emu-cache/
+build-offline/

@@ -19,6 +19,11 @@ and the Switch.
   - The mirror uses a negative x scale in vita2d (`source/vita/gfx.c`); if a device shows it
     wrong, replace it with a pre-flipped quad without changing the gfx.h contract.
   - Never write settings anywhere except `ux0:data/Tweebbo/`; tokens stay private.
+  - Keep `vita2d_wait_rendering_done()` in `gfx_present` and never free a texture during the
+    drawing pass: freeing or rewinding what the GPU still reads is a `GPUCRASH` on hardware
+    (Vita3K does not show it). Load and free textures only between frames.
+  - Every vita2d draw goes through `pool_ok()`: vita2d writes vertices through an unchecked
+    pointer when its pool is full.
 - **Verification**: `./build.sh` must produce `out/tweebbo.vpk` from a clean tree. The VPK is
   built with `ZIP_STORED` and the furniture inside `romfs/furni.pak` (29 files, quick to install
   in VitaShell); keep it that way unless a measurement says otherwise. `./build.sh offline`
@@ -27,5 +32,7 @@ and the Switch.
   The `sce_sys` / LiveArea images **must be 8-bit indexed PNGs** (`tools/make-sce_sys.py`):
   24-bit ones fail the install with `0x8010113D`. Cross-play check against a local hotel with
   the updated server:
-  `TWEEBBO_URL=ws://127.0.0.1:8092 node ../Tweebbo-Vercel/tests/device-announcement.mjs`.
+  `TWEEBBO_URL=ws://127.0.0.1:8092 node ../Tweebbo-Vercel/tests/device-announcement.mjs` (the room
+  must hear the Switch and the Vita: the server needs the device-byte `current` rule). Visual check:
+  `SERVER=ws://127.0.0.1:8092 tools/emu/run.sh` (Vita3K, see README).
 - Never log, show or commit player tokens (`token-*.txt`), private codes or production data.

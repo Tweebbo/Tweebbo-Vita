@@ -59,7 +59,10 @@ static struct {
   u64 next_look, next_gesture, next_walk;
   /* One-shot checkpoints: the log pins the stage that faults the GPU. */
   bool log_room_info, log_stage_world, log_stage_frame;
-} V = {.zoom = 2, .platform = "Console", .hello = "Hello from the hotel!"};
+/* Zoom 1 on the half-resolution canvas is the classic 64×32 tile shown at 2× on screen:
+   the whole lobby and everyone in it fit, which is what the cross-play photo needs.
+   R zooms in to 2 for close-ups. */
+} V = {.zoom = 1, .platform = "Console", .hello = "Hello from the hotel!"};
 
 /* Short notice pill shown under the banner (hotel notices, kicks). */
 static char toast[128];
