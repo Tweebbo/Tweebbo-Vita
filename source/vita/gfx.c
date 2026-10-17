@@ -30,10 +30,46 @@ static int pend_n;
 static struct { vita2d_texture *tex[4]; const RoomBackground *bg; int pages; } room;
 static struct { vita2d_texture *tex[4]; const Scene *scene; int pages; } scene_v;
 
-static vita2d_texture *load_png(const char *path) {
-  vita2d_texture *t = vita2d_load_PNG_file(path);
-  if (!t) { dbg_log("texture missing: %s", path); return NULL; }
+/* PNG decoding goes through the vendored stb_image (no libpng/NEON at runtime):
+   the previous dump showed the fault inside png_read_filter_row_paeth3_neon. */
+#include "stb_image.h"
+
+static vita2d_texture *texture_from_rgba(const unsigned char *px, int w, int h) {
+  vita2d_texture *t = vita2d_create_empty_texture((unsigned)w, (unsigned)h);
+  if (!t) return NULL;
+  unsigned char *dst = vita2d_texture_get_datap(t);
+  unsigned stride = vita2d_texture_get_stride(t);
+  for (int y = 0; y < h; y++) memcpy(dst + (size_t)y * stride, px + (size_t)y * w * 4, (size_t)w * 4);
   vita2d_texture_set_filters(t, SCE_GXM_TEXTURE_FILTER_POINT, SCE_GXM_TEXTURE_FILTER_POINT);
+  return t;
+}
+
+static vita2d_texture *decode_png(const u8 *data, int len) {
+  int w = 0, h = 0, comp = 0;
+  unsigned char *px = stbi_load_from_memory(data, len, &w, &h, &comp, 4);
+  if (!px) { dbg_log("png decode failed (%d bytes)", len); return NULL; }
+  vita2d_texture *t = texture_from_rgba(px, w, h);
+  stbi_image_free(px);
+  return t;
+}
+
+static vita2d_texture *load_png(const char *path) {
+  FILE *f = fopen(path, "rb");
+  if (!f) { dbg_log("texture missing: %s", path); return NULL; }
+  fseek(f, 0, SEEK_END);
+  long len = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  u8 *buf = malloc((size_t)len);
+  if (!buf || fread(buf, 1, (size_t)len, f) != (size_t)len) {
+    dbg_log("texture unreadable: %s", path);
+    if (buf) free(buf);
+    fclose(f);
+    return NULL;
+  }
+  fclose(f);
+  vita2d_texture *t = decode_png(buf, (int)len);
+  free(buf);
+  if (!t) dbg_log("texture broken: %s", path);
   return t;
 }
 
@@ -97,9 +133,8 @@ static vita2d_texture *furni_blob(u16 def, u16 page) {
         free(buf);
         return NULL;
       }
-      vita2d_texture *t = vita2d_load_PNG_buffer(buf);
+      vita2d_texture *t = decode_png(buf, pak.idx[mid].size);
       free(buf);
-      if (t) vita2d_texture_set_filters(t, SCE_GXM_TEXTURE_FILTER_POINT, SCE_GXM_TEXTURE_FILTER_POINT);
       return t;
     }
     if (pak.idx[mid].key < key) lo = mid + 1; else hi = mid - 1;
