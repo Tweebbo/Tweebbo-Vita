@@ -15,11 +15,17 @@
 
 static vita2d_texture *atlas[ATLAS_PAGES];
 static vita2d_texture *font_tex;
+static vita2d_texture *mask_tri_up, *mask_tri_down, *mask_disc;
 static bool additive;
 
 typedef struct { u16 def; u8 page; bool used; vita2d_texture *tex; u32 stamp; } FurniTex;
 static FurniTex furni_cache[FURNI_CACHE];
 static u32 furni_clock;
+
+/* Furniture queued during a frame; loaded at the start of the next one (GXM
+   textures must not be created in the middle of a drawing pass). */
+static u16 pend_def[64];
+static int pend_n;
 
 static struct { vita2d_texture *tex[4]; const RoomBackground *bg; int pages; } room;
 static struct { vita2d_texture *tex[4]; const Scene *scene; int pages; } scene_v;
@@ -27,6 +33,29 @@ static struct { vita2d_texture *tex[4]; const Scene *scene; int pages; } scene_v
 static vita2d_texture *load_png(const char *path) {
   vita2d_texture *t = vita2d_load_PNG_file(path);
   if (!t) { dbg_log("texture missing: %s", path); return NULL; }
+  vita2d_texture_set_filters(t, SCE_GXM_TEXTURE_FILTER_POINT, SCE_GXM_TEXTURE_FILTER_POINT);
+  return t;
+}
+
+/* Solid shapes are drawn as one textured quad each: rasterising per scanline flooded
+   GXM with tens of thousands of rectangles per frame (kernel panic on real hardware).
+   The masks are 64×32 (triangles) and 64×64 (disc), white with alpha in the shape. */
+static vita2d_texture *make_mask(int kind) {
+  const int w = 64, h = kind == 2 ? 64 : 32;
+  vita2d_texture *t = vita2d_create_empty_texture(w, h);
+  if (!t) return NULL;
+  u32 *px = vita2d_texture_get_datap(t);
+  for (int y = 0; y < h; y++)
+    for (int x = 0; x < w; x++) {
+      bool in = false;
+      if (kind == 0) in = y >= (h - 1) - (x < w / 2 ? x * 2 * h / w : (w - 1 - x) * 2 * h / w);
+      else if (kind == 1) in = y <= (x < w / 2 ? x * 2 * h / w : (w - 1 - x) * 2 * h / w);
+      else {
+        float dx = x - (w - 1) / 2.0f, dy = y - (h - 1) / 2.0f;
+        in = dx * dx + dy * dy <= ((w - 1) / 2.0f) * ((w - 1) / 2.0f);
+      }
+      px[y * w + x] = in ? 0xffffffffu : 0x00000000u;
+    }
   vita2d_texture_set_filters(t, SCE_GXM_TEXTURE_FILTER_POINT, SCE_GXM_TEXTURE_FILTER_POINT);
   return t;
 }
@@ -92,6 +121,10 @@ bool gfx_init(void) {
     if (!atlas[i] && i == 0) return false;
   }
   font_tex = load_png("app0:gfx/font0.png");
+  mask_tri_up = make_mask(0);
+  mask_tri_down = make_mask(1);
+  mask_disc = make_mask(2);
+  dbg_log("gfx: masks %s", (mask_tri_up && mask_tri_down && mask_disc) ? "ok" : "FAILED");
   dbg_log("gfx ready: vita2d, canvas %dx%d at %.0fx", SCREEN_W, SCREEN_H, S);
   return true;
 }
@@ -99,12 +132,22 @@ bool gfx_init(void) {
 void gfx_exit(void) {
   for (int i = 0; i < ATLAS_PAGES; i++) if (atlas[i]) vita2d_free_texture(atlas[i]);
   if (font_tex) vita2d_free_texture(font_tex);
+  if (mask_tri_up) vita2d_free_texture(mask_tri_up);
+  if (mask_tri_down) vita2d_free_texture(mask_tri_down);
+  if (mask_disc) vita2d_free_texture(mask_disc);
   gfx_room_release();
   for (int i = 0; i < 4; i++) if (scene_v.tex[i]) { vita2d_free_texture(scene_v.tex[i]); scene_v.tex[i] = NULL; }
   vita2d_fini();
 }
 
-void gfx_frame(void) {}
+void gfx_frame(void) {
+  /* Load the furniture queued during the previous frame (never mid-pass). */
+  u16 defs[COUNT(pend_def)];
+  int n = pend_n;
+  memcpy(defs, pend_def, sizeof defs);
+  pend_n = 0;
+  for (int i = 0; i < n; i++) gfx_furni_preload(defs[i]);
+}
 
 void gfx_begin(void) { vita2d_start_drawing(); vita2d_clear_screen(); }
 void gfx_present(void) { vita2d_end_drawing(); vita2d_swap_buffers(); }
@@ -145,7 +188,7 @@ void gfx_font_sprite(int sx, int sy, int sw, int sh, float x, float y, bool flip
   draw_tex(font_tex, sx, sy, sw, sh, x, y, 1, 1, flip, color);
 }
 
-static vita2d_texture *furni_get(u16 def, int page) {
+static vita2d_texture *furni_fetch(u16 def, u16 page) {
   FurniTex *slot = NULL, *victim = &furni_cache[0];
   for (int i = 0; i < FURNI_CACHE; i++) {
     FurniTex *c = &furni_cache[i];
@@ -155,7 +198,7 @@ static vita2d_texture *furni_get(u16 def, int page) {
   if (!slot) {
     slot = victim;
     if (slot->tex) vita2d_free_texture(slot->tex);
-    slot->tex = furni_blob(def, (u16)page);
+    slot->tex = furni_blob(def, page);
     slot->def = def;
     slot->page = (u8)page;
     slot->used = true;
@@ -164,13 +207,38 @@ static vita2d_texture *furni_get(u16 def, int page) {
   return slot->tex;
 }
 
+static vita2d_texture *cache_lookup(u16 def, u16 page) {
+  for (int i = 0; i < FURNI_CACHE; i++) {
+    FurniTex *c = &furni_cache[i];
+    if (c->used && c->def == def && c->page == page) {
+      c->stamp = ++furni_clock;
+      return c->tex;
+    }
+  }
+  return NULL;
+}
+
+/* GXM textures must not be created in the middle of a drawing pass: a missing
+   texture is queued and loaded at the start of the next frame (gfx_frame). */
+static void pend_push(u16 def) {
+  for (int i = 0; i < pend_n; i++) if (pend_def[i] == def) return;
+  if (pend_n < COUNT(pend_def)) pend_def[pend_n++] = def;
+}
+
 void gfx_furni(u16 def, const FurniPart *part, float x, float y, float scale, u32 color) {
-  vita2d_texture *t = furni_get(def, part->page);
-  if (!t) return;
+  vita2d_texture *t = cache_lookup(def, (u16)part->page);
+  if (!t) {
+    pend_push(def);
+    return;
+  }
   draw_tex(t, part->x, part->y, part->w, part->h, x, y, scale, scale, false, color);
 }
 
-void gfx_furni_preload(u16 def) { (void)def; }
+void gfx_furni_preload(u16 def) {
+  /* Outside the draw pass (room change): load every page of the definition now. */
+  for (int i = 0; i < furni_texture_count; i++)
+    if (furni_textures[i].def == def) furni_fetch(def, furni_textures[i].page);
+}
 
 const RoomBackground *gfx_room(const char *model) {
   for (int i = 0; i < room_background_count; i++) {
@@ -240,7 +308,30 @@ void fill_rect(float x, float y, float w, float h, u32 color) {
 }
 
 void fill_circle(float cx, float cy, float r, u32 color) {
-  vita2d_draw_fill_circle(cx * S, cy * S, r * S, color);
+  if (!mask_disc) return;
+  vita2d_draw_texture_tint_scale(mask_disc, (cx - r) * S, (cy - r) * S, (2 * r / 64.0f) * S, (2 * r / 64.0f) * S, color);
+}
+
+void fill_triangle(float x1, float y1, float x2, float y2, float x3, float y3, u32 color) {
+  /* Isometric tile halves: one textured mask per shape, never per scanline. */
+  const float ys[3] = {y1, y2, y3}, xs[3] = {x1, x2, x3};
+  int at_min = 0, at_max = 0;
+  float ymin = ys[0], ymax = ys[0], xmin = xs[0], xmax = xs[0];
+  for (int i = 0; i < 3; i++) {
+    if (ys[i] < ymin) ymin = ys[i];
+    if (ys[i] > ymax) ymax = ys[i];
+    if (xs[i] < xmin) xmin = xs[i];
+    if (xs[i] > xmax) xmax = xs[i];
+  }
+  for (int i = 0; i < 3; i++) {
+    if (ys[i] == ymin) at_min++;
+    if (ys[i] == ymax) at_max++;
+  }
+  float w = xmax - xmin, h = ymax - ymin;
+  if (w <= 0 || h <= 0) return;
+  vita2d_texture *mask = at_min == 1 && at_max == 2 ? mask_tri_up : at_max == 1 && at_min == 2 ? mask_tri_down : mask_tri_up;
+  if (!mask) return;
+  vita2d_draw_texture_tint_scale(mask, xmin * S, ymin * S, (w / 64.0f) * S, (h / 32.0f) * S, color);
 }
 
 void fill_round(float x, float y, float w, float h, float r, u32 color) {
@@ -250,26 +341,6 @@ void fill_round(float x, float y, float w, float h, float r, u32 color) {
   fill_circle(x + w - r, y + r, r, color);
   fill_circle(x + r, y + h - r, r, color);
   fill_circle(x + w - r, y + h - r, r, color);
-}
-
-static void rect_line(float x, float y, float w, float h, u32 color) {
-  fill_rect(x, y, w, 1, color);
-}
-
-void fill_triangle(float x1, float y1, float x2, float y2, float x3, float y3, u32 color) {
-  /* vita2d has no triangles: approximate the isometric tile with two rows of pixels. */
-  float miny = y1 < y2 ? (y1 < y3 ? y1 : y3) : (y2 < y3 ? y2 : y3);
-  float maxy = y1 > y2 ? (y1 > y3 ? y1 : y3) : (y2 > y3 ? y2 : y3);
-  for (float y = miny; y <= maxy; y++) {
-    /* Walk the two edges of the diamond at this scanline. */
-    float xs[3];
-    xs[0] = x1 + (x2 - x1) * ((y - y1) / (y2 - y1 + 1e-6f));
-    xs[1] = x2 + (x3 - x2) * ((y - y2) / (y3 - y2 + 1e-6f));
-    xs[2] = x3 + (x1 - x3) * ((y - y3) / (y1 - y3 + 1e-6f));
-    float lo = xs[0], hi = xs[0];
-    for (int i = 1; i < 3; i++) { if (xs[i] < lo) lo = xs[i]; if (xs[i] > hi) hi = xs[i]; }
-    if (hi > lo) rect_line(lo, y, hi - lo + 1, 1, color);
-  }
 }
 
 void draw_line(float x1, float y1, float x2, float y2, u32 color) {

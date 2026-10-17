@@ -168,6 +168,7 @@ int main(void) {
 
     u64 now = now_ms();
     net_update(now);
+    gfx_frame(); /* load furniture queued by the previous frame, outside the draw pass */
     gfx_begin();
     show_frame(now_ms());
     gfx_present();
