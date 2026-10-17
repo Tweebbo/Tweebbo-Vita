@@ -19,7 +19,9 @@ and the Switch.
   - The mirror uses a negative x scale in vita2d (`source/vita/gfx.c`); if a device shows it
     wrong, replace it with a pre-flipped quad without changing the gfx.h contract.
   - Never write settings anywhere except `ux0:data/Tweebbo/`; tokens stay private.
-- **Verification**: `./build.sh` must produce `out/tweebbo.vpk` from a clean tree. Cross-play
-  check against a local hotel with the updated server:
+- **Verification**: `./build.sh` must produce `out/tweebbo.vpk` from a clean tree. The VPK is
+  built with `ZIP_STORED` and the furniture inside `romfs/furni.pak` (29 files, quick to install
+  in VitaShell); keep it that way unless a measurement says otherwise. Cross-play check against
+  a local hotel with the updated server:
   `TWEEBBO_URL=ws://127.0.0.1:8092 node ../Tweebbo-Vercel/tests/device-announcement.mjs`.
 - Never log, show or commit player tokens (`token-*.txt`), private codes or production data.

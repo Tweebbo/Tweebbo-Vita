@@ -74,8 +74,13 @@ romfs/             PNG assets fetched from the 3DS export (gfx/ and furni/)
 
 ## Notes
 
-- The VPK packs the PNGs uncompressed (vita-pack-vpk); the assets are the same PNGs the web
-  export produces, so the art is identical to the other clients.
+- **Fast-install VPK**: the package is built with `ZIP_STORED` (VitaShell copies instead of
+  inflating) and the 1909 furniture textures travel inside a single `furni.pak` read on demand
+  (`tools/pack-furni.py`), so the VPK carries 29 files instead of 1937. That is what made the
+  classic VitaShell install crawl. The size barely changes because the PNGs were already
+  compressed.
+- The assets are the same PNGs the web export produces, so the art is identical to the other
+  clients.
 - The mirror for left/right facing sprites uses a negative x scale in vita2d; it is verified on
   Vita3K during development but still needs the physical-console photo pass (OLED/LCD/PS TV).
 - Not in this proof of concept (roadmap): build mode, catalogue, inventory, friends, pets, games,
