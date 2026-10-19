@@ -2,6 +2,8 @@
 
 Play Tweebbo on your PlayStation Vita, in the same hotel as [tweebbo.lol](https://tweebbo.lol).
 
+Also on [Nintendo 3DS](https://github.com/Tweebbo/tweebbo-3ds) and [Nintendo Switch](https://github.com/Tweebbo/TweebboNX).
+
 ![Download QR](download-qr.png)
 
 ## Download
