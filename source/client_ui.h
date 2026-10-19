@@ -27,6 +27,16 @@ void client_ui_capsule(float x, float y, float w, float h, const char *text);
 /** Draws a pad-button glyph and its label; returns the x after the hint. */
 float client_ui_key_hint(const char *key, const char *text, float x, float y, u32 ink, u32 text_ink);
 void client_ui_label(const char *text, float x, float y, float width, u32 ink);
+/** Registers a pad/touch hotspot without drawing it; returns whether it has the pad focus. */
+bool client_ui_hot(float x, float y, float w, float h, int cmd, int arg);
+/** Classic graphic (ui_sprites) shrunk to fit a `box` square centred on (cx, cy). */
+bool client_ui_icon_fit(const char *name, float cx, float cy, float box);
+/** Classic graphic at `scale` with its top-left at (x, y); returns its drawn width, 0 if absent. */
+float client_ui_sprite(const char *name, float x, float y, float scale);
+/** 0xRRGGBB as an opaque renderer colour. */
+u32 client_ui_rgb(u32 c);
+/** Small classic list/page arrow button ("<", ">", "^", "v"). */
+void client_ui_arrow(float x, float y, float w, float h, const char *glyph, int cmd, int arg);
 void client_ui_changed(void);
 void client_ui_inspect(u32 item);
 void client_ui_close(void);

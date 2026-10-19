@@ -1,23 +1,26 @@
 #!/usr/bin/env bash
-# Copies the shared Tweebbo graphics into romfs/ from the 3DS debug build tree
-# (which runs the web export and packs it). Re-run after a new export.
+# Packs the shared Tweebbo graphics for this console from the 3DS export tree (build/export,
+# made by `./build.sh export` there) with the HD profile of tools/pack.py: the whole classic
+# interface at its original size, not the 3DS's memory-saving subset. Re-run after a new export.
 #   tools/fetch-assets.sh [path-to-Tweebbo-3DS]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 SRC=${1:-../Tweebbo-3DS}
-GFX="$SRC/build/gfx"
-
-[ -d "$GFX" ] || { echo "No $GFX: build Tweebbo-3DS once (./build.sh) or pass its path."; exit 1; }
-for file in source/assets.h source/gen/assets.c source/gen/font.c; do
+[ -d "$SRC/build/export/data" ] || { echo "No $SRC/build/export: run ./build.sh export in Tweebbo-3DS first."; exit 1; }
+rm -rf build/pack-hd
+PACK_OUT="$PWD/build/pack-hd" PACK_HD=1 python3 "$SRC/tools/pack.py" "$SRC/build/export"
+GFX="$PWD/build/pack-hd/gfx"
+for file in source/assets.h source/gen/font.c; do
   [ -f "$SRC/$file" ] || { echo "Missing generated asset input: $SRC/$file"; exit 1; }
 done
 
 mkdir -p romfs/gfx romfs/furni romfs/spaces
-cp "$SRC"/romfs/spaces/*.mask "$SRC"/romfs/spaces/*.rgb romfs/spaces/
+cp build/pack-hd/spaces/*.mask build/pack-hd/spaces/*.rgb romfs/spaces/
+rm -f romfs/gfx/atlas*.png romfs/furni/*.png
 # Atlas pages, bitmap font and the classic room backgrounds/scenes.
 # The export decides how many pages there are (atlas0..N and atlasg0..N).
 cp "$GFX"/atlas*.png romfs/gfx/
-cp "$GFX"/font0.png romfs/gfx/
+cp "$SRC"/build/gfx/font0.png romfs/gfx/
 cp "$GFX"/pets_*.png romfs/gfx/
 cp "$GFX"/room_*.png romfs/gfx/ 2>/dev/null || true
 cp "$GFX"/scene_*.png romfs/gfx/ 2>/dev/null || true
@@ -26,7 +29,7 @@ cp "$GFX"/furni/*.png romfs/furni/
 # Sprite coordinates and texture pages must come from the same export.
 mkdir -p source/gen
 cp "$SRC/source/assets.h" source/assets.h
-cp "$SRC/source/gen/assets.c" "$SRC/source/gen/font.c" "$SRC/source/gen/character_skins.h" source/gen/
+cp build/pack-hd/gen/assets.c build/pack-hd/gen/character_skins.h "$SRC/source/gen/font.c" source/gen/
 echo "romfs ready: $(ls romfs/gfx | wc -l) gfx files, $(ls romfs/furni | wc -l) furniture textures"
 
 mkdir -p romfs/snow

@@ -9,7 +9,13 @@ void client_shop_update(void);
 void client_shop_visible(bool visible);
 const char *client_shop_wall(void);
 const char *client_shop_floor(void);
-void client_shop_draw(float x, float y, float w);
+void client_shop_draw(float x, float y, float w, float h);
+/** The catalogue and inventory use the large PC-style window; other shop views keep 310x224. */
+bool client_shop_wide(void);
+/** Window title of the large shop views. */
+const char *client_shop_title(void);
+/** Whether the open shop view switches catalogue sections with ZL/ZR (Vita: right stick). */
+bool client_shop_sections(void);
 void client_shop_action(int command, int arg);
 void client_shop_notice(const char *text);
 void client_shop_item(u32 id);

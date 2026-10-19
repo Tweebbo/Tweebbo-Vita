@@ -20,7 +20,8 @@ void show_toast(const char *text, u64 now);
 /** Pixel-art badge of a native device, for the player panel (1 3DS, 2 Switch, 3 Vita). */
 void show_device_badge(int device, float x, float y, float k);
 
-enum { SHOW_A = 1, SHOW_B, SHOW_X, SHOW_Y, SHOW_L, SHOW_R, SHOW_OFFLINE };
+/** SHOW_ZL/SHOW_ZR: Switch ZL/ZR, Vita right stick up/down (page and section keys of the windows). */
+enum { SHOW_A = 1, SHOW_B, SHOW_X, SHOW_Y, SHOW_L, SHOW_R, SHOW_OFFLINE, SHOW_ZL, SHOW_ZR };
 /** A confirms, B closes/opens Rooms, X waves, Y writes chat, L/R zoom. */
 void show_action(int action);
 /** One step in a direction (dx and dy in -1..1). */

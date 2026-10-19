@@ -103,6 +103,12 @@ static void input(SceCtrlData *pad, unsigned prev, bool *running) {
   if (down & SCE_CTRL_LTRIGGER) show_action(SHOW_L);
   if (down & SCE_CTRL_RTRIGGER) show_action(SHOW_R);
   if (down & SCE_CTRL_SELECT) show_action(SHOW_OFFLINE);
+  // The right stick stands in for the Switch's ZL/ZR: up = previous, down = next (window
+  // sections and pages), once per push.
+  static int rstick;
+  int r = pad->ry < 128 - 64 ? -1 : pad->ry > 128 + 64 ? 1 : 0;
+  if (r && r != rstick) show_action(r < 0 ? SHOW_ZL : SHOW_ZR);
+  rstick = r;
   if ((down & SCE_CTRL_START) && show_confirm_quit("START", now_ms())) *running = false;
 
   if (now < next) return;
