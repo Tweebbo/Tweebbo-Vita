@@ -18,6 +18,7 @@
 #include "client_pool.h"
 #include "client_ui.h"
 #include "world.h"
+#include "update.h"
 
 #define DATA_DIR "ux0:data/Tweebbo"
 
@@ -165,6 +166,7 @@ int main(void) {
     u64 now = now_ms();
     net_update(now);
     client_ui_update();
+    if (update_exit_requested()) running = false;
 #ifdef TWEEBBO_UI_TEST
     static u64 test_start;
     static int test_step;

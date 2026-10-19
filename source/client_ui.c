@@ -19,7 +19,6 @@
 #include "proto.h"
 #include "paylink.h"
 #include "update.h"
-#include "../vendor/qrcodegen/qrcodegen.h"
 #include <jansson.h>
 #include <math.h>
 #include <stdio.h>
@@ -30,7 +29,7 @@
 enum { CLOSED, ROOMS, CHAT, ME, DRESS, HELP, KEYBOARD, NEW_ROOM, PEOPLE, PERSON, CONFIRM, RIGHTS, MORE, SHOP, SOCIAL, GAMES, PETS, SETTINGS, LOCK_CONFIRM, TRADE, ACTIONS, CASINO, SNOW, POOL, BAR, IDENTITY, MUSIC, CHIPS, SUPPORT, UPDATE };
 enum { OPEN = 1, CLOSE, REFRESH, SCOPE, ENTER_ROOM, PAGE, WRITE, RENAME, CATEGORY,
        STYLE, COLOR, SAVE_LOOK, KEY, BACKSPACE, SHIFT, SPACE, SUBMIT, OFFLINE, RESUME, LOBBY,
-       PICK_STYLE, PICK_COLOR, SEARCH, CLEAR_SEARCH, MODEL, CREATE_ROOM, SELECT_PERSON, MODERATE, CONFIRM_MOD, SYMBOLS, REVOKE, UNBAN, OPEN_SHOP, REMOVE_LOCK, SAVE_LOCK, GESTURE, PUT_DRINK_AWAY, ACTIVITY_CONTEXT, GOTO_CASINO, PAY_CODE, UPDATE_LATER };
+       PICK_STYLE, PICK_COLOR, SEARCH, CLEAR_SEARCH, MODEL, CREATE_ROOM, SELECT_PERSON, MODERATE, CONFIRM_MOD, SYMBOLS, REVOKE, UNBAN, OPEN_SHOP, REMOVE_LOCK, SAVE_LOCK, GESTURE, PUT_DRINK_AWAY, ACTIVITY_CONTEXT, GOTO_CASINO, PAY_CODE, UPDATE_LATER, UPDATE_INSTALL, UPDATE_CHECK, UPDATE_RESTART, UPDATE_CLOSE, CHECK_UPDATES };
 #ifdef TWEEBBO_LAN_ONLY
 #define RETURN_LABEL "Return to LAN hotel"
 #else
@@ -164,21 +163,86 @@ static bool pill(const char *base, const char *state, float x, float y, float w,
   if (iw > 0) gfx_sprite_xy(m->page, m->x, m->y, m->w, m->h, x+lw, y, iw/m->w, h/m->h, false, tint);
   return true;
 }
-/** Original pad-button glyph (Ⓐ, Ⓑ, L, R, ZL…): light key with a dark letter. */
+/** Width of a pad-button glyph (circle, shoulder or D-pad). */
+static float pad_glyph_width(const char *key) {
+  if (!strcmp(key, "Cross") || !strcmp(key, "Circle") || !strcmp(key, "Triangle") ||
+      !strcmp(key, "Square") || !strcmp(key, "D-pad")) return 16;
+  return fmaxf(16, text_width(key, 10) + 10);
+}
+#if TWEEBBO_DEVICE == 3
+/** PlayStation face symbol inside the light key. */
+static void play_shape(const char *key, float cx, float cy, u32 ink) {
+  if (!strcmp(key, "Cross")) {
+    for (int k = -1; k <= 1; k++) {
+      draw_line(cx - 3.4f, cy - 3.4f + k, cx + 3.4f, cy + 3.4f + k, ink);
+      draw_line(cx - 3.4f, cy + 3.4f + k, cx + 3.4f, cy - 3.4f + k, ink);
+    }
+  } else if (!strcmp(key, "Circle")) {
+    fill_circle(cx, cy, 4.2f, ink);
+    fill_circle(cx, cy, 2.7f, color(CL_FACE));
+  } else if (!strcmp(key, "Triangle")) {
+    fill_triangle(cx, cy - 4.2f, cx - 4.2f, cy + 3.2f, cx + 4.2f, cy + 3.2f, ink);
+    fill_triangle(cx, cy - 1.6f, cx - 2.2f, cy + 2.2f, cx + 2.2f, cy + 2.2f, color(CL_FACE));
+  } else if (!strcmp(key, "Square")) {
+    fill_rect(cx - 3.5f, cy - 3.5f, 7, 7, ink);
+    fill_rect(cx - 2.1f, cy - 2.1f, 4.2f, 4.2f, color(CL_FACE));
+  }
+}
+#endif
+/** One native pad glyph: Switch-style circles/shoulders or Vita shapes. */
 static void pad_glyph(const char *key, float x, float y) {
-  float w = fmaxf(14, text_width(key, 10) + 8);
+  float w = pad_glyph_width(key), cx = x + w / 2, cy = y + 7;
+#if TWEEBBO_DEVICE == 3
+  if (!strcmp(key, "Cross") || !strcmp(key, "Circle") || !strcmp(key, "Triangle") || !strcmp(key, "Square")) {
+    fill_circle(cx, cy, 7, color(0x1f2a30));
+    fill_circle(cx, cy, 6, color(CL_FACE));
+    play_shape(key, cx, cy, color(0x1f2a30));
+    return;
+  }
+#endif
+  if (key[0] && !key[1] && strchr("ABXY", key[0])) {
+    fill_circle(cx, cy, 7, color(0x1f2a30));
+    fill_circle(cx, cy, 6, color(CL_FACE));
+    text_draw(key, cx, y + 1, 10, color(0x1f2a30), 1);
+    return;
+  }
+  if (!strcmp(key, "D-pad")) {
+    fill_circle(cx, cy, 7, color(0x1f2a30));
+    fill_circle(cx, cy, 6, color(CL_FACE));
+    fill_rect(cx - 1.5f, cy - 3.8f, 3, 7.6f, color(0x1f2a30));
+    fill_rect(cx - 3.8f, cy - 1.5f, 7.6f, 3, color(0x1f2a30));
+    return;
+  }
+  // Shoulder and menu buttons keep the capsule shape.
   fill_round(x, y, w, 14, 7, color(0x1f2a30));
-  fill_round(x+1, y+1, w-2, 12, 6, color(CL_FACE));
-  // The letter is always dark: the key face is light whatever the hint text colour is.
-  text_draw(key, x+w/2, y+2, 10, color(0x1f2a30), 1);
+  fill_round(x + 1, y + 1, w - 2, 12, 6, color(CL_FACE));
+  // The glyph letter is always dark: the key face is light whatever the hint text colour is.
+  text_draw(key, cx, y + 2, 10, color(0x1f2a30), 1);
 }
 /** One "Ⓐ Choose" hint; returns the x after it. */
 float client_ui_key_hint(const char *key, const char *text, float x, float y, u32 ink, u32 text_ink) {
   (void)ink;
   pad_glyph(key, x, y);
-  float w = fmaxf(14, text_width(key, 10) + 8);
-  text_draw(text, x+w+5, y+2, 10, color(text_ink), 0);
+  float w = pad_glyph_width(key);
+  text_draw(text, x + w + 5, y + 2, 10, color(text_ink), 0);
   return x + w + 5 + text_width(text, 10) + 10;
+}
+/** Small always-on control legend in the room, styled like the console's pad glyphs. */
+static void room_hints(float margin) {
+#if TWEEBBO_DEVICE == 3
+  static const char *keys[] = {"Cross", "Triangle", "Square", "Circle"};
+  static const char *labels[] = {"Talk/use", "Chat", "Wave", "Rooms"};
+#else
+  static const char *keys[] = {"A", "Y", "X", "B", "L/R"};
+  static const char *labels[] = {"Talk/use", "Chat", "Wave", "Rooms", "Zoom"};
+#endif
+  float w = -10;
+  for (int i = 0; i < COUNT(keys); i++) w += pad_glyph_width(keys[i]) + 5 + text_width(labels[i], 10) + 10;
+  float x = margin + 8, y = margin + 7;
+  fill_round(x - 6, y - 4, w + 12, 21, 9, color_alpha(0x1f2a30, 205));
+  fill_round(x - 5, y - 3, w + 10, 19, 8, color_alpha(0x36586b, 225));
+  for (int i = 0; i < COUNT(keys); i++)
+    x = client_ui_key_hint(keys[i], labels[i], x, y, 0xffffff, 0xffffff);
 }
 /** Registers a control rectangle without drawing anything. */
 static void hotspot(float x, float y, float w, float h, int cmd, int arg) {
@@ -328,30 +392,59 @@ static void classic_hud(float margin) {
   U.chip_w = wide?66:46; U.chip_h = 20;
   if (!U.panel) hotspot(U.chip_x, U.chip_y, U.chip_w, U.chip_h, OPEN, CHIPS);
 }
-/** A QR code (qrcodegen buffer) centred at (cx, cy) in a white square. */
-static void draw_qr(const uint8_t *qr, float cx, float cy, float side) {
-  fill_round(cx-side/2-4, cy-side/2-4, side+8, side+8, 4, color(0xffffff));
-  int n = qrcodegen_getSize(qr);
-  float m = (float)(int)(side / n), o = (side - m * n) / 2;
-  for (int y = 0; y < n; y++)
-    for (int x = 0; x < n; x++)
-      if (qrcodegen_getModule(qr, x, y)) fill_rect(cx-side/2+o+x*m, cy-side/2+o+y*m, m, m, color(0x111920));
-}
-/** The update window: the new version and a QR code to its download page. */
+/** The update window: offer, download progress and install instructions. */
 static void update_draw(float x, float y, float w) {
-  static uint8_t qr[qrcodegen_BUFFER_LEN_FOR_VERSION(10)];
-  static char encoded[200];
-  if (strcmp(encoded, update_url())) {
-    uint8_t temp[qrcodegen_BUFFER_LEN_FOR_VERSION(10)];
-    snprintf(encoded, sizeof encoded, "%s", update_url());
-    if (!qrcodegen_encodeText(encoded, temp, qr, qrcodegen_Ecc_MEDIUM, qrcodegen_VERSION_MIN, 10, qrcodegen_Mask_AUTO, true)) qr[0] = 0;
+  UpdateState st = update_state();
+  char text[240];
+  if (st == UPD_CHECKING) {
+    client_ui_paragraph("Searching GitHub for the newest Tweebbo release...", x + 12, y + 40, w - 24, 3, CL_INK);
+    client_ui_paragraph("The hotel keeps running while Tweebbo checks.", x + 12, y + 110, w - 24, 2, CL_MUTED);
+    button(x + 8, y + 188, w - 16, 26, "Close", UPDATE_CLOSE, 0);
+  } else if (st == UPD_AVAILABLE) {
+    snprintf(text, sizeof text, "Tweebbo %s is available.", update_version());
+    label(text, x + 12, y + 34, w - 24, CL_INK);
+    client_ui_paragraph(update_notes()[0] ? update_notes() : "Your character, rooms and purchases stay the same.", x + 12, y + 60, w - 24, 6, CL_INK);
+    client_ui_paragraph("Update now? The download continues if the connection drops.", x + 12, y + 150, w - 24, 2, CL_MUTED);
+    button(x + 8, y + 188, 140, 26, "Later", UPDATE_LATER, 0);
+    button(x + 156, y + 188, 146, 26, "Update now", UPDATE_INSTALL, 0);
+  } else if (st == UPD_DOWNLOADING) {
+    int pct = (int)(update_progress() * 100);
+    snprintf(text, sizeof text, "Downloading Tweebbo %s... %d%%", update_version(), pct);
+    label(text, x + 12, y + 40, w - 24, CL_INK);
+    fill_round(x + 12, y + 70, w - 24, 14, 7, color(CL_SHADE));
+    if (pct > 0) fill_round(x + 12, y + 70, (w - 24) * pct / 100.0f, 14, 7, color(CL_ONLINE));
+    client_ui_paragraph("Keep Tweebbo open. If the connection drops, the download resumes where it stopped.", x + 12, y + 102, w - 24, 3, CL_MUTED);
+    client_ui_paragraph("The release is checked against its SHA-256 before installing.", x + 12, y + 150, w - 24, 2, CL_MUTED);
+  } else if (st == UPD_INSTALLED) {
+#if TWEEBBO_DEVICE == 3
+    label("Update downloaded", x + 12, y + 36, w - 24, CL_ONLINE);
+    client_ui_paragraph("Open VitaShell and install this file. Your character and rooms stay the same.", x + 12, y + 66, w - 24, 3, CL_INK);
+    snprintf(text, sizeof text, "%s", update_installed_path());
+    client_ui_paragraph(text, x + 12, y + 106, w - 24, 3, CL_MUTED);
+    button(x + 8, y + 188, w - 16, 26, "Close", UPDATE_CLOSE, 0);
+#else
+    label("Update installed", x + 12, y + 36, w - 24, CL_ONLINE);
+    client_ui_paragraph("Close Tweebbo and open it again from the Homebrew Menu to use the new version. Your character and rooms stay the same.", x + 12, y + 66, w - 24, 5, CL_INK);
+    button(x + 8, y + 188, 140, 26, "Later", UPDATE_CLOSE, 0);
+    button(x + 156, y + 188, 146, 26, "Restart now", UPDATE_RESTART, 0);
+#endif
+  } else if (st == UPD_FAILED) {
+    label("Update not installed", x + 12, y + 36, w - 24, CL_RED);
+    client_ui_paragraph(update_error()[0] ? update_error() : "The update could not be installed.", x + 12, y + 64, w - 24, 5, CL_INK);
+    client_ui_paragraph("A partial download is kept: searching again resumes it.", x + 12, y + 150, w - 24, 2, CL_MUTED);
+    button(x + 8, y + 188, 140, 26, "Later", UPDATE_LATER, 0);
+    button(x + 156, y + 188, 146, 26, "Try again", UPDATE_CHECK, 0);
+  } else if (st == UPD_LATEST) {
+    snprintf(text, sizeof text, "You have the latest version (%s).", update_current());
+    label(text, x + 12, y + 40, w - 24, CL_INK);
+    client_ui_paragraph("Tweebbo searches for updates when you enter the hotel. You can search again here at any time.", x + 12, y + 82, w - 24, 4, CL_MUTED);
+    button(x + 8, y + 188, w - 16, 26, "Close", UPDATE_CLOSE, 0);
+  } else {
+    label("Tweebbo updates", x + 12, y + 40, w - 24, CL_INK);
+    client_ui_paragraph("Search GitHub for the newest release. Tweebbo installs it inside the game.", x + 12, y + 70, w - 24, 4, CL_MUTED);
+    button(x + 8, y + 188, 140, 26, "Later", UPDATE_LATER, 0);
+    button(x + 156, y + 188, 146, 26, "Search now", UPDATE_CHECK, 0);
   }
-  char text[200];
-  snprintf(text, sizeof text, "Tweebbo %s is out for %s, with the latest hotel features. We recommend updating now.", update_available() ? update_available() : "", show_platform());
-  client_ui_paragraph(text, x + 12, y + 32, w - 124, 5, CL_INK);
-  client_ui_paragraph("Scan the code with your phone or PC to download it, then copy it to your memory card.", x + 12, y + 110, w - 124, 4, CL_MUTED);
-  if (qr[0]) draw_qr(qr, x + w - 56, y + 86, 88);
-  button(x + 8, y + 188, w - 16, 26, "Later", UPDATE_LATER, 0);
 }
 /** The live pay code (paylink.c) in a white square, or the QR to tweebbo.lol without one. */
 static void pay_qr(float cx, float cy, float side) {
@@ -622,6 +715,15 @@ static void activate(int cmd, int arg) {
     }
     case OPEN: open_panel(arg); break;
     case UPDATE_LATER: update_dismiss(); open_panel(CLOSED); break;
+    case UPDATE_INSTALL: update_start(); break;
+    case UPDATE_CHECK: update_check(); break;
+    case UPDATE_RESTART: update_restart(); break;
+    case UPDATE_CLOSE: update_dismiss(); open_panel(CLOSED); break;
+    case CHECK_UPDATES:
+      if (update_state() != UPD_AVAILABLE && update_state() != UPD_DOWNLOADING &&
+          update_state() != UPD_INSTALLED && update_state() != UPD_CHECKING) update_check();
+      open_panel(UPDATE);
+      break;
     case PAY_CODE: paylink_open(arg ? "chips" : "club", now_ms()); break;
     case OPEN_SHOP: U.shop_kind=arg;client_shop_open(arg);open_panel(SHOP);break;
     case GOTO_CASINO:
@@ -781,8 +883,11 @@ void client_ui_update(void) {
   client_identity_update();client_music_update();
   if(U.panel==CHIPS || U.panel==SUPPORT)paylink_poll(now_ms());
   update_poll(now_ms());
-  // Offer a published update at login, once, until the player picks Later.
-  if(update_available() && !update_dismissed() && !U.panel && W.in_room)open_panel(UPDATE);
+  // Offer a published update at login, once, until the player picks Later. A newer
+  // release found later clears the dismissal.
+  static int seen_offer;
+  if (update_offer() != seen_offer) { seen_offer = update_offer(); update_forget_dismiss(); }
+  if (update_state() == UPD_AVAILABLE && !update_dismissed() && !U.panel && W.in_room) open_panel(UPDATE);
   if (strcmp(U.server,net_server())) client_ui_reset();
   if((U.panel==LOCK_CONFIRM || (U.panel==KEYBOARD && U.edit==EDIT_ROOM_PASSWORD)) &&
      (!W.room_owner || !net_online() || strcmp(U.settings_room,W.slug))) {
@@ -902,6 +1007,8 @@ void client_ui_draw(void) {
   // canvas while a panel is open, where it would overlap.
   if (W.in_room && (SCREEN_W >= 600 || !U.panel)) classic_hud(margin);
   else U.chip_w = 0;
+  // Small always-on control legend, so the pad map is visible while playing.
+  if (!U.panel && W.in_room) room_hints(margin);
   if (!U.panel) {
     char context[128];int kind=-1;
     if(net_online()){
@@ -919,7 +1026,7 @@ void client_ui_draw(void) {
     return;
   }
   float w=U.panel==KEYBOARD?360:310, x=margin+8,y=margin+8,h=224;
-  static const char *titles[]={"","Navigator","Chat","My character","Change looks","Help","Write","Create a room","People in this room","Player","Confirm room action","Room access","Hotel","Furniture","Friends Console","Games","Pets","Room settings","Confirm room access","Safe Trading","Character actions","Casino","Snow Storm","Lido activities","After Hours Bar","Badges & identity","Music & sound","Buy chips","Support Tweebbo","Update available"};
+  static const char *titles[]={"","Navigator","Chat","My character","Change looks","Help","Write","Create a room","People in this room","Player","Confirm room action","Room access","Hotel","Furniture","Friends Console","Games","Pets","Room settings","Confirm room access","Safe Trading","Character actions","Casino","Snow Storm","Lido activities","After Hours Bar","Badges & identity","Music & sound","Buy chips","Support Tweebbo","Tweebbo update"};
   static const char *edit_titles[]={"Write a message","Change name","Room password","Find a room","Room name","","New room password"};
   char title_buf[384]; const char *title;
   if (U.panel==KEYBOARD) title = U.edit==EDIT_FEATURE?U.edit_title:edit_titles[U.edit];
@@ -1140,12 +1247,20 @@ void client_ui_draw(void) {
     label(U.tv?"TV mode: every control works with a pad.":"The left stick and touch also work.",x+10,hy,w-20,CL_INK);
 #endif
     button(x+8,y+110,w-16,24,net_state()==NET_OFFLINE?RETURN_LABEL:"Play offline",OFFLINE,0);
-    if(net_state()!=NET_OFFLINE)button(x+8,y+138,w-16,24,"Return to lobby",LOBBY,0);
+    UpdateState us=update_state();
+    char upd[96];
+    if(us==UPD_AVAILABLE)snprintf(upd,sizeof upd,"Install update %s",update_version());
+    else if(us==UPD_CHECKING)snprintf(upd,sizeof upd,"Searching for updates...");
+    else if(us==UPD_DOWNLOADING)snprintf(upd,sizeof upd,"Updating...");
+    else if(us==UPD_INSTALLED)snprintf(upd,sizeof upd,"Finish update");
+    else snprintf(upd,sizeof upd,"Search for updates");
+    button(x+8,y+138,w-16,24,upd,CHECK_UPDATES,0);
     float third=(w-24)/3;
-    button(x+8,y+166,third,24,"Music / sound",OPEN,MUSIC);
-    button(x+12+third,y+166,third,24,"Support",OPEN,SUPPORT);
-    button(x+16+third*2,y+166,third,24,"Buy chips",OPEN,CHIPS);
+    button(x+8,y+164,third,24,"Music / sound",OPEN,MUSIC);
+    button(x+12+third,y+164,third,24,"Support",OPEN,SUPPORT);
+    button(x+16+third*2,y+164,third,24,"Buy chips",OPEN,CHIPS);
     if(net_state()==NET_REPLACED || net_state()==NET_DENIED)button(x+8,y+192,w-16,24,"Retry connection",RESUME,0);
+    else if(net_state()!=NET_OFFLINE)button(x+8,y+192,w-16,24,"Return to lobby",LOBBY,0);
   }
   if(U.status[0])label(U.status,margin+8,bar+8,SCREEN_W-16-margin*2,0xffffff);
   else if(client_shop_building()) {

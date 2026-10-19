@@ -20,8 +20,22 @@ Download `tweebbo.vpk` from the latest release.
 4. Open VitaShell, select `tweebbo.vpk` and install it.
 5. Launch **Tweebbo** from the LiveArea and connect to the internet. Offline play is also available.
 
+## Controls
+
+The room shows a small button legend in the top-left corner.
+
+- **Cross**: talk or use furniture
+- **Triangle**: chat · **Square**: wave · **Circle**: rooms or close
+- **L/R**: room zoom · **START**: quit
+
+## Updates
+
+When you enter the hotel, Tweebbo checks GitHub for a newer release and offers **Update now**. The
+download resumes if the connection drops and is verified against the release SHA-256. The VPK is
+saved to `ux0:data/Tweebbo/tweebbo.vpk`; open VitaShell and install it over the old version.
+**Help → Search for updates** checks again at any time.
+
 ## Notes
 
 - Free to play. No PlayStation Network account is needed.
 - Tweebbo is not affiliated with Sony.
-- To update, download the newest `tweebbo.vpk` from the link above and install it over the old version.
