@@ -404,6 +404,7 @@ static void changed(void) { U.count = 0; U.focus = 0; }
 void client_ui_button(float x,float y,float w,float h,const char *text,int cmd,int arg) {button(x,y,w,h,text,cmd,arg);}
 void client_ui_field(float x,float y,float w,float h,const char *text,const char *placeholder,int cmd,int arg) {field(x,y,w,h,text,placeholder,cmd,arg);}
 void client_ui_window(float x,float y,float w,float h,const char *title) {window_chrome(x,y,w,h,title,false);}
+void client_ui_panel(float x,float y,float w,float h) {nine_slice("content.",x,y,w,h,0xffffffff);}
 void client_ui_capsule(float x,float y,float w,float h,const char *text) {
   float r=fminf(h/2.0f,12.0f);
   if(!pill("button.a","active",x,y,w,h,0xffffffff)) {

@@ -447,6 +447,11 @@ void show_room_changed(u64 now) {
 // ------------------------------------------------------------------ interface
 
 /** First interactive furniture next to the avatar (for the "Press A" prompt). */
+static bool interactive(const FurniDef *d) {
+  if (!d || d->kind == KIND_WALL) return false;
+  return d->kind == KIND_SIT || d->kind == KIND_TOGGLE || d->kind == KIND_DICE || d->casino ||
+         (d->flags & (DEF_LAY | DEF_TELEPORTER | DEF_GATE)) || (d->drinks && *d->drinks);
+}
 static const Item *nearby_furniture(void) {
   Ent *me = world_ent(W.me);
   if (!me) return NULL;
@@ -457,11 +462,24 @@ static const Item *nearby_furniture(void) {
     int dx = (int)it->x - me->x, dy = (int)it->y - me->y;
     if (dx * dx + dy * dy > 2) continue;
     const FurniDef *d = def_get(it->def);
-    if (!d || (d->kind==KIND_BLOCK && !d->casino && !(d->flags&(DEF_LAY|DEF_TELEPORTER|DEF_GATE)) && !(d->drinks&&*d->drinks)))continue;
+    if (!interactive(d)) continue;
     best = it;
     if (dx == 0 && dy == 0) break;
   }
   return best;
+}
+/** Human verb for the contextual prompt, like the 3DS player's card. */
+static void interaction_label(const Item *it, const FurniDef *d, char *out, size_t cap) {
+  const char *name = d && d->name && *d->name ? d->name : "furniture";
+  if (d->casino) snprintf(out, cap, "Play %s", name);
+  else if (d->drinks && *d->drinks) snprintf(out, cap, "Get a drink");
+  else if (d->kind == KIND_DICE) snprintf(out, cap, "Roll the dice");
+  else if (d->flags & DEF_TELEPORTER) snprintf(out, cap, "Enter the teleporter");
+  else if (d->flags & DEF_GATE) snprintf(out, cap, it->state ? "Close the gate" : "Open the gate");
+  else if (d->kind == KIND_TOGGLE) snprintf(out, cap, it->state ? "Switch off %s" : "Switch on %s", name);
+  else if (d->flags & DEF_LAY) snprintf(out, cap, "Lie down");
+  else if (d->kind == KIND_SIT) snprintf(out, cap, "Sit on %s", name);
+  else snprintf(out, cap, "Use %s", name);
 }
 
 
@@ -472,10 +490,9 @@ static void draw_ui(u64 now) {
     snprintf(t, sizeof t, "%s", toast);
     text_fit(t, 11, SCREEN_W - 40);
     float tw = text_width(t, 11);
-    // Classic floating notice under the top edge.
-    fill_round(SCREEN_W / 2 - tw / 2 - 11, 6, tw + 22, 21, 10, rgb(0x1f2a30, 255));
-    fill_round(SCREEN_W / 2 - tw / 2 - 10, 7, tw + 20, 19, 9, rgb(0x36586b, 255));
-    text_draw(t, SCREEN_W / 2, 10, 11, rgb(0xffffff, 255), 1);
+    // Classic floating notice under the top edge (original content inset, blue rim).
+    client_ui_panel(SCREEN_W / 2 - tw / 2 - 11, 6, tw + 22, 21);
+    text_draw(t, SCREEN_W / 2, 10, 11, rgb(0x18272a, 255), 1);
   }
   // Contextual "Ⓐ Use <furniture>" prompt beside the room, like the console editions.
   if (W.in_room && !client_ui_room_left()) {
@@ -483,18 +500,18 @@ static void draw_ui(u64 now) {
     if (it) {
       const FurniDef *d = def_get(it->def);
       char use[96];
-      snprintf(use, sizeof use, "Use %s", d && d->name && *d->name ? d->name : "furniture");
+      interaction_label(it, d, use, sizeof use);
+      text_fit(use, 10, SCREEN_W - 130);
 #if TWEEBBO_DEVICE == 3
       const char *key = "Cross";
 #else
       const char *key = "A";
 #endif
       float gw = fmaxf(14, text_width(key, 10) + 8);
-      float pw = gw + 5 + text_width(use, 10) + 18;
-      float px = SCREEN_W - pw - 10, py = SCREEN_H - 62;
-      fill_round(px, py, pw, 20, 10, rgb(0x1f2a30, 255));
-      fill_round(px + 1, py + 1, pw - 2, 18, 9, rgb(0x36586b, 255));
-      client_ui_key_hint(key, use, px + 5, py + 3, 0xffffff, 0xffffff);
+      float pw = gw + 8 + text_width(use, 10) + 14;
+      float px = SCREEN_W - pw - 10, py = SCREEN_H - 64;
+      client_ui_panel(px, py, pw, 22);
+      client_ui_key_hint(key, use, px + 6, py + 4, 0, 0x18272a);
     }
   }
 }
@@ -513,6 +530,8 @@ void show_frame(u64 now) {
     float w = SCREEN_W >= 600 ? 340 : 300, h = 150;
     float x = (SCREEN_W - w) / 2, y = SCREEN_H / 2 - h / 2 - 18;
     client_ui_window(x, y, w, h, "Tweebbo");
+    // Original white content inset inside the window, like every hotel panel.
+    client_ui_panel(x + 8, y + 28, w - 16, h - 56);
     char line[160];
     snprintf(line, sizeof line, "%s", status);
     u32 ink = state == NET_FULL || state == NET_LOCKED || state == NET_DENIED ? 0xc1272d : 0x18272a;
@@ -521,12 +540,12 @@ void show_frame(u64 now) {
     if (state != NET_OFFLINE) {
       snprintf(line, sizeof line, "Hotel: %s", net_server());
       text_fit(line, 10, w - 28);
-      text_draw(line, x + 14, y + 68, 10, rgb(0x4d5b61, 255), 0);
+      text_draw(line, x + 14, y + 70, 10, rgb(0x4d5b61, 255), 0);
       /* No hotel on this Wi-Fi: the same build plays offline (the local simulation with bots).
          Classic capsule, like every other button in the hotel. */
       snprintf(line, sizeof line, "%s - play offline", V.offline_key);
       float bw = text_width(line, 12) + 30, bh = 24;
-      float bx = SCREEN_W / 2 - bw / 2, by = y + 90;
+      float bx = SCREEN_W / 2 - bw / 2, by = y + 92;
       V.pill_x = bx; V.pill_y = by; V.pill_w = bw; V.pill_h = bh;
       client_ui_capsule(bx, by, bw, bh, line);
     }

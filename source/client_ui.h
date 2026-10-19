@@ -20,6 +20,8 @@ void client_ui_button(float x, float y, float w, float h, const char *text, int 
 void client_ui_field(float x, float y, float w, float h, const char *text, const char *placeholder, int cmd, int arg);
 /** Original 9-slice window frame with its centred title, without registering a close box. */
 void client_ui_window(float x, float y, float w, float h, const char *title);
+/** Original content inset (white body, classic blue rim) for floating hints and notices. */
+void client_ui_panel(float x, float y, float w, float h);
 /** Enabled classic capsule button drawn as a hint only (no hotspot). */
 void client_ui_capsule(float x, float y, float w, float h, const char *text);
 /** Draws a pad-button glyph and its label; returns the x after the hint. */
