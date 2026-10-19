@@ -63,6 +63,7 @@ void send_walk(int x, int y);
 void send_chat(const char *text);
 void send_gesture(int kind);
 void send_use(u32 item);
+void send_use_op(u32 item,u8 op);
 void send_look(u64 look);
 void send_name(const char *name);
 void send_buy(u16 offer);
@@ -73,6 +74,7 @@ void send_rotate(u32 id);
 void send_redeem(u32 id);
 void send_drink(u32 item, int drink);
 void send_pet(const char *json);
+void send_trade(const char *json);
 
 void send_decorate(int kind, const char *id);
 
@@ -80,3 +82,7 @@ void send_game(int op, u32 a, int b, int c, int d);
 void send_casino(int op, int a, int b, int c);
 /** Room moderation: op (MOD_*), entity id (or guest id for unban/remove-of), ban length 1-3. */
 void send_room_mod(int op, u32 target, int length);
+
+void send_activity(const char *json);
+
+void send_music(const char *json);

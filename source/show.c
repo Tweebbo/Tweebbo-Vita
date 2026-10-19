@@ -1,9 +1,18 @@
-// Showcase application: room rendering and interface, ported from the 3DS scene.c
-// and reduced to what the Switch/Vita proof of concept needs (no build mode, pets,
-// catalogue or games). The showcase rotates the five brand models with SET_LOOK so
-// every console in the shared room sees the character change.
+// Shared room renderer for the Switch and Vita clients.
 #include "show.h"
+#include "client_ui.h"
+#include "client_snow.h"
+#include "client_pool.h"
+#include "client_bar.h"
+#include "client_music.h"
+#include "client_shop.h"
+#include "client_social.h"
+#include "client_pets.h"
+#include "client_trade.h"
+#include "client_casino.h"
+#include "pets.h"
 #include <math.h>
+#include <jansson.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,9 +36,6 @@
 #define BUBBLE_BASE 74
 #define BUBBLE_TEXT 12.0f
 
-#define LOOK_MS 5000
-#define GESTURE_MS 11000
-#define WALK_MS 9000
 
 /** ABGR like citro2d: 0xAABBGGRR. */
 static u32 rgba(u32 rgb, u8 a) { return (u32)a << 24 | (rgb & 0xff) << 16 | (rgb & 0xff00) | (rgb >> 16 & 0xff); }
@@ -56,9 +62,6 @@ static struct {
   /* "Play offline" pill of the connection screen (touch target), in canvas pixels. */
   float pill_x, pill_y, pill_w, pill_h;
   bool quit;
-  /* Showcase cast. */
-  int cast;
-  u64 next_look, next_gesture, next_walk;
   /* One-shot checkpoints: the log pins the stage that faults the GPU. */
   bool log_room_info, log_stage_world, log_stage_frame;
 /* Zoom 1 on the half-resolution canvas is the classic 64×32 tile shown at 2× on screen:
@@ -78,6 +81,18 @@ static void iso(float x, float y, float *sx, float *sy) {
 static float scr_x(float wx) { return roundf(V.cam_x * V.zoom) + wx * V.zoom; }
 static float scr_y(float wy) { return roundf(V.cam_y * V.zoom) + wy * V.zoom; }
 
+bool show_confirm_quit(const char *key, u64 now) {
+  static u64 asked;
+  if (asked && now - asked < 3000) return true;
+  asked = now;
+  char text[64];
+  snprintf(text, sizeof text, "Press %s again to exit Tweebbo.", key);
+  show_toast(text, now);
+  return false;
+}
+
+const char *show_platform(void) { return V.platform ? V.platform : "this console"; }
+
 void show_set_platform(const char *name, const char *hello) {
   V.platform = name;
   V.hello = hello;
@@ -87,68 +102,40 @@ void show_set_offline_key(const char *key) { V.offline_key = key; }
 
 bool show_quit_requested(void) { return V.quit; }
 
-// ------------------------------------------------------------------ showcase
-
-/* The five brand character models (same table as the 3DS showcase build). */
-static const Look CAST[] = {
-  {.skin = 0, .hair_style = 1, .hair_color = 3, .shirt_color = 0, .shirt_style = 0, .pants = 0,
-   .shoes = 0, .pants_style = 0, .shoe_style = 0, .face_style = 0},                                  /* Bobba */
-  {.skin = 0, .hair_style = 5, .hair_color = 0, .shirt_color = 1, .shirt_style = 3, .pants = 1,
-   .shoes = 1, .pants_style = 1, .shoe_style = 1, .face_style = 9},                                  /* Cyber */
-  {.skin = 1, .hair_style = 12, .hair_color = 0, .shirt_color = 1, .shirt_style = 3, .pants = 1,
-   .shoes = 0, .pants_style = 1, .shoe_style = 0, .face_style = 10},                                 /* Director */
-  {.skin = 0, .hair_style = 6, .hair_color = 1, .shirt_color = 5, .shirt_style = 1, .pants = 0,
-   .shoes = 1, .pants_style = 0, .shoe_style = 2, .face_style = 9},                                  /* Street */
-  {.skin = 1, .hair_style = 3, .hair_color = 1, .shirt_color = 9, .shirt_style = 1, .pants = 6,
-   .shoes = 2, .pants_style = 6, .shoe_style = 2, .face_style = 1},                                  /* VIP Girl */
-};
-static const char *CAST_NAME[] = {"Bobba", "Cyber", "Director", "Street", "VIP Girl"};
-
 void show_start(u64 now) {
-  V.cast = 0;
-  V.next_look = now + 2500;
-  V.next_gesture = now + 7000;
-  V.next_walk = now + WALK_MS;
-}
-
-static void showcase_update(u64 now) {
-  // Online or in the offline simulation (same protocol): the cast keeps rotating either way.
-  if (!W.in_room || !(net_online() || net_state() == NET_OFFLINE)) return;
-  if (now >= V.next_look) {
-    V.next_look = now + LOOK_MS;
-    V.cast = (V.cast + 1) % COUNT(CAST);
-    send_look(look_encode(&CAST[V.cast]));
-  }
-  if (now >= V.next_gesture) {
-    V.next_gesture = now + GESTURE_MS;
-    send_gesture(V.cast % 2 ? GESTURE_WAVE : GESTURE_DANCE);
-  }
-  if (now >= V.next_walk) {
-    V.next_walk = now + WALK_MS;
-    Ent *me = world_ent(W.me);
-    if (me) {
-      int x = me->x + rnd_range(-3, 4), y = me->y + rnd_range(-2, 3);
-      if (x >= 0 && y >= 0 && x < W.w && y < W.h && world_tile(x, y)) send_walk(x, y);
-    }
-  }
+  (void)now;
+  client_ui_init();
 }
 
 // ------------------------------------------------------------------ camera
 
 static void camera(u64 now) {
   float lw = SCREEN_W / V.zoom, tx, ty;
+  float left = client_ui_room_left() / V.zoom;
+  float visible = lw - left;
   Ent *me = world_ent(W.me);
+  const BuildGhost *ghost=client_shop_ghost();
+  if(ghost->on) {
+    float sx,sy;iso(ghost->x,ghost->y,&sx,&sy);
+    tx=left+visible*.5f-sx;ty=SCREEN_H/V.zoom*.60f-sy+ghost->z;
+    V.cam_x+=(tx-V.cam_x)*.12f;V.cam_y+=(ty-V.cam_y)*.12f;return;
+  }
+  float activity_x,activity_y;
+  if(pool_camera(&activity_x,&activity_y,now)){
+    tx=left+visible/2-activity_x;ty=SCREEN_H/V.zoom*.5f-activity_y;
+    V.cam_x+=(tx-V.cam_x)*.12f;V.cam_y+=(ty-V.cam_y)*.12f;return;
+  }
   if (!me) {
-    tx = lw / 2 - (V.bx0 + V.bx1) / 2;
+    tx = left + visible / 2 - (V.bx0 + V.bx1) / 2;
     ty = lw * .5f / (SCREEN_W / (float)SCREEN_H) - (V.by0 + V.by1) / 2;
   } else {
     float px, py, sx, sy;
     ent_pos(me, now, &px, &py);
     iso(px, py, &sx, &sy);
-    tx = lw * .5f - sx;
+    tx = left + visible * .5f - sx;
     ty = (SCREEN_H / V.zoom) * .60f - sy + ent_height(me, now);
-    if (V.bx1 - V.bx0 >= lw) tx = fminf(-V.bx0, fmaxf(lw - V.bx1, tx));
-    else tx = lw / 2 - (V.bx0 + V.bx1) / 2;
+    if (V.bx1 - V.bx0 >= visible) tx = fminf(left - V.bx0, fmaxf(lw - V.bx1, tx));
+    else tx = left + visible / 2 - (V.bx0 + V.bx1) / 2;
     float lh = SCREEN_H / V.zoom;
     if (V.by1 - V.by0 >= lh) ty = fminf(-V.by0, fmaxf(lh - V.by1, ty));
     else ty = lh / 2 - (V.by0 + V.by1) / 2;
@@ -246,6 +233,8 @@ static void device_badge(int device, float x, float y, float k) {
   else badge_draw(BADGE_3DS, 13, PAL_3DS, COUNT(PAL_3DS), x, y, k);
 }
 
+void show_device_badge(int device, float x, float y, float k) { device_badge(device, x, y, k); }
+
 static void device_badge_size(int device, int *w, int *h) {
   if (device == DEVICE_SWITCH) { *w = 14; *h = 9; }
   else if (device == DEVICE_VITA) { *w = 12; *h = 9; }
@@ -268,7 +257,7 @@ static void fallback_floor(void) {
     }
 }
 
-typedef struct { float depth; int seq; const Item *item; const FurniPart *part; const Ent *ent; const SceneSprite *layer; } Drawable;
+typedef struct { float depth; int seq; const Item *item; const FurniPart *part; const Ent *ent; const SceneSprite *layer; const Pet *pet; } Drawable;
 
 static int by_depth(const void *a, const void *b) {
   const Drawable *x = a, *y = b;
@@ -285,6 +274,25 @@ static void draw_item_part(const Item *it, const FurniPart *p) {
   if (add) gfx_additive(false);
 }
 
+/** The character skin a player wears (owner snapshot "skins"), 0 for none. */
+static int character_skin(u32 guest) {
+  static int rev = -1;
+  static json_t *skins;
+  if (rev != (int)W.owners_rev) {
+    rev = (int)W.owners_rev;
+    if (skins) json_decref(skins);
+    json_t *owners = W.owners_json ? json_loads(W.owners_json, 0, NULL) : NULL;
+    skins = owners ? json_incref(json_object_get(owners, "skins")) : NULL;
+    if (owners) json_decref(owners);
+  }
+  size_t i; json_t *entry;
+  json_array_foreach(skins, i, entry) {
+    int skin = (int)json_integer_value(json_object_get(entry, "skin"));
+    if ((u32)json_integer_value(json_object_get(entry, "guest")) == guest && skin >= 1 && skin <= 7) return skin;
+  }
+  return 0;
+}
+
 static void draw_ent(const Ent *e, u64 now) {
   float px, py, sx, sy;
   ent_pos(e, now, &px, &py);
@@ -298,11 +306,22 @@ static void draw_ent(const Ent *e, u64 now) {
   bool blink = (now + e->id * 1777) % 5200 < 130;
   int drink = now < e->drink_until ? e->drink : 0;
   bool sip = !moving && (now + e->id * 177) % 6000 < 900;
-  u64 look = e->look | ((e->flags & 128) ? AV_FRANK : 0);
+  int bar_pose=client_bar_sip(e,now,moving);if(bar_pose>=0)sip=bar_pose!=0;
+  int skin = character_skin(e->guest);
+  u64 look = skin ? (e->look | ((u64)skin << 48)) : pool_look(e,e->look) | ((e->flags & 128) ? AV_FRANK : 0);
+  if(V.scene && V.scene->water>=0 && e->x<W.w && e->y<W.h && W.rows[e->y*W.w+e->x]>='0' && W.rows[e->y*W.w+e->x]<=(char)('0'+V.scene->water)){
+    avatar_draw_swim(look,body_dir(e,moving),moving?POSE_SWIM:POSE_FLOAT,(now/160)&3,(talking?EXPR_TALK:0)|(blink?EXPR_BLINK:0),head_dir(e,now,moving),scr_x(roundf(sx)-SWIM_ANCHOR_X),scr_y(roundf(sy+HALF_H)-ANCHOR_Y),V.zoom);return;
+  }
   avatar_draw(look, body_dir(e, moving), p.pose, p.frame, (talking ? EXPR_TALK : 0) | (blink ? EXPR_BLINK : 0),
               head_dir(e, now, moving), drink, sip,
               scr_x(roundf(sx) + p.dx - ANCHOR_X), scr_y(roundf(sy + HALF_H) + p.dy - p.anchor_y - p.lift), V.zoom, 255);
-  /* Badge of the native device above the head (devices come from the S_DEVICE message). */
+}
+
+static void draw_ent_badge(const Ent *e, u64 now) {
+  float px, py, sx, sy;
+  ent_pos(e, now, &px, &py);
+  iso(px, py, &sx, &sy);
+  PoseInfo p = pose_of(e, now, ent_moving(e, now));
   int device = e->device ? e->device : ((e->flags & FLAG_3DS) ? DEVICE_3DS : 0);
   if (device) {
     int bw = 12, bh = 13;
@@ -438,133 +457,88 @@ static const Item *nearby_furniture(void) {
     int dx = (int)it->x - me->x, dy = (int)it->y - me->y;
     if (dx * dx + dy * dy > 2) continue;
     const FurniDef *d = def_get(it->def);
-    if (!d || d->kind == KIND_BLOCK) continue;
+    if (!d || (d->kind==KIND_BLOCK && !d->casino && !(d->flags&(DEF_LAY|DEF_TELEPORTER|DEF_GATE)) && !(d->drinks&&*d->drinks)))continue;
     best = it;
     if (dx == 0 && dy == 0) break;
   }
   return best;
 }
 
-static const char *prompt_text(const Item *it) {
-  const FurniDef *d = def_get(it->def);
-  if (!d) return "Use";
-  switch (d->kind) {
-    case KIND_SIT: return "Sit";
-    case KIND_FLOOR: return "Lie down";
-    case KIND_TOGGLE: return "Switch on/off";
-    case KIND_DICE: return "Roll the dice";
-    default: return "Use";
-  }
-}
 
 static void draw_ui(u64 now) {
-  /* Short notice pill under the banner. */
+  client_ui_draw();
   if (toast[0] && now < toast_until) {
-    char t[110];
+    char t[128];
     snprintf(t, sizeof t, "%s", toast);
     text_fit(t, 11, SCREEN_W - 40);
     float tw = text_width(t, 11);
-    fill_round(SCREEN_W / 2 - tw / 2 - 8, 44, tw + 16, 18, 9, rgba(0x26373a, 220));
-    text_draw(t, SCREEN_W / 2, 47, 11, rgb(0xeceae2, 255), 1);
+    // Classic floating notice under the top edge.
+    fill_round(SCREEN_W / 2 - tw / 2 - 11, 6, tw + 22, 21, 10, rgb(0x1f2a30, 255));
+    fill_round(SCREEN_W / 2 - tw / 2 - 10, 7, tw + 20, 19, 9, rgb(0x36586b, 255));
+    text_draw(t, SCREEN_W / 2, 10, 11, rgb(0xffffff, 255), 1);
   }
-  /* Showcase banner: gold over the classic chrome. */
-  char line[80];
-  snprintf(line, sizeof line, "TWEEBBO SHOWCASE - %s", V.platform);
-  float tw = text_width(line, 13);
-  fill_round(SCREEN_W / 2 - tw / 2 - 8, 6, tw + 16, 20, 4, rgba(0x0b0d0e, 200));
-  text_draw(line, SCREEN_W / 2, 9, 13, rgb(0xffd166, 255), 1);
-  if (net_state() == NET_OFFLINE) snprintf(line, sizeof line, "Model: %s - offline (%s: hotel)", CAST_NAME[V.cast], V.offline_key);
-  else snprintf(line, sizeof line, "Model: %s", CAST_NAME[V.cast]);
-  text_draw(line, SCREEN_W / 2, 28, 11, rgb(0x8fd9ff, 255), 1);
-
-  /* Classic bottom bar. */
-  float bar_y = SCREEN_H - 34;
-  fill_rect(0, bar_y, SCREEN_W, 34, rgba(0x0b0d0e, 220));
-  fill_rect(0, bar_y, SCREEN_W, 1, rgb(0x526d76, 255));
-  const char *labels[] = {"Me", "Rooms", "Shop", "Hand", "Friends", "Chat", "Help"};
-  for (int i = 0; i < COUNT(labels); i++) {
-    float w = SCREEN_W / (float)COUNT(labels);
-    float x = i * w;
-    fill_rect(x + 4, bar_y + 5, w - 8, 23, rgb(0x232a30, 255));
-    fill_rect(x + 5, bar_y + 6, w - 10, 21, rgb(0x33475f, 255));
-    text_draw(labels[i], x + w / 2, bar_y + 12, 11, rgb(0xffffff, 255), 1);
-  }
-  /* Room, presence and credits. */
-  snprintf(line, sizeof line, "%s", W.in_room ? W.title : net_status());
-  fill_round(8, bar_y - 24, text_width(line, 11) + 14, 18, 4, rgba(0x0b0d0e, 190));
-  text_draw(line, 15, bar_y - 21, 11, rgb(0xeceae2, 255), 0);
-  if (W.in_room) {
-    snprintf(line, sizeof line, "%d online", W.online);
-    fill_round(SCREEN_W - 190, bar_y - 24, 82, 18, 4, rgba(0x0b0d0e, 190));
-    text_draw(line, SCREEN_W - 176, bar_y - 21, 11, rgb(0x8fd9ff, 255), 0);
-    snprintf(line, sizeof line, "%u credits", W.credits);
-    fill_round(SCREEN_W - 104, bar_y - 24, 96, 18, 4, rgba(0x0b0d0e, 190));
-    text_draw(line, SCREEN_W - 90, bar_y - 21, 11, rgb(0xffd166, 255), 0);
-  }
-
-  /* Press-A prompt of the nearest interactive furniture or player. */
-  const Item *near = W.in_room ? nearby_furniture() : NULL;
-  if (near) {
-    snprintf(line, sizeof line, "A - %s", prompt_text(near));
-    float w = text_width(line, 11) + 16;
-    fill_round(SCREEN_W / 2 - w / 2, bar_y - 26, w, 20, 10, rgba(0x0b0d0e, 210));
-    fill_round(SCREEN_W / 2 - w / 2, bar_y - 26, 20, 20, 10, rgb(0x7fcf55, 255));
-    text_draw("A", SCREEN_W / 2 - w / 2 + 10, bar_y - 23, 12, rgb(0x000000, 255), 1);
-    text_draw(line + 3, SCREEN_W / 2 - w / 2 + 24, bar_y - 23, 11, rgb(0xffffff, 255), 0);
-  }
-
-  /* Classic window with the current character (the "changing models" card). */
-  float wx = 10, wy = 60;
-  fill_rect(wx, wy, 150, 92, rgba(0x000000, 190));
-  fill_rect(wx + 1, wy + 1, 148, 90, rgb(0xdfdfd3, 255));
-  fill_rect(wx + 3, wy + 3, 144, 16, rgb(0x526d76, 255));
-  text_draw("Me", wx + 8, wy + 5, 11, rgb(0xffffff, 255), 0);
-  Ent *me = world_ent(W.me);
-  if (me) {
-    avatar_draw_head(me->look, 2, wx + 14, wy + 30, 0.7f);
-    char name[24];
-    snprintf(name, sizeof name, "%s", me->name);
-    text_fit(name, 12, 96);
-    text_draw(name, wx + 56, wy + 30, 12, rgb(0x11181c, 255), 0);
-    text_draw(V.platform, wx + 56, wy + 46, 11, rgb(0x1b5b91, 255), 0);
-    text_draw("X wave - B model - Y hello", wx + 8, wy + 76, 10, rgb(0x444444, 255), 0);
+  // Contextual "Ⓐ Use <furniture>" prompt beside the room, like the console editions.
+  if (W.in_room && !client_ui_room_left()) {
+    const Item *it = nearby_furniture();
+    if (it) {
+      const FurniDef *d = def_get(it->def);
+      char use[96];
+      snprintf(use, sizeof use, "Use %s", d && d->name && *d->name ? d->name : "furniture");
+#if TWEEBBO_DEVICE == 3
+      const char *key = "Cross";
+#else
+      const char *key = "A";
+#endif
+      float gw = fmaxf(14, text_width(key, 10) + 8);
+      float pw = gw + 5 + text_width(use, 10) + 18;
+      float px = SCREEN_W - pw - 10, py = SCREEN_H - 62;
+      fill_round(px, py, pw, 20, 10, rgb(0x1f2a30, 255));
+      fill_round(px + 1, py + 1, pw - 2, 18, 9, rgb(0x36586b, 255));
+      client_ui_key_hint(key, use, px + 5, py + 3, 0xffffff, 0xffffff);
+    }
   }
 }
 
 // ------------------------------------------------------------------ frame
 
 void show_frame(u64 now) {
-  showcase_update(now);
   gfx_filter(false);
+  if(client_snow_scene(now)){client_ui_draw();return;}
   if (!W.in_room) {
     NetState state = net_state();
     const char *status = state == NET_FULL ? "Tweebbo is at capacity"
                         : state == NET_LOCKED ? "This room is locked"
                         : state == NET_DENIED ? "Connection paused"
                         : net_status()[0] ? net_status() : "Connecting...";
+    float w = SCREEN_W >= 600 ? 340 : 300, h = 150;
+    float x = (SCREEN_W - w) / 2, y = SCREEN_H / 2 - h / 2 - 18;
+    client_ui_window(x, y, w, h, "Tweebbo");
     char line[160];
-    text_draw("Tweebbo", SCREEN_W / 2, SCREEN_H / 2 - 50, 16, rgb(0xffd166, 255), 1);
     snprintf(line, sizeof line, "%s", status);
-    text_fit(line, 13, SCREEN_W - 20);
-    text_draw(line, SCREEN_W / 2, SCREEN_H / 2 - 26, 13, rgb(0xeceae2, 255), 1);
+    u32 ink = state == NET_FULL || state == NET_LOCKED || state == NET_DENIED ? 0xc1272d : 0x18272a;
+    client_ui_paragraph(line, x + 14, y + 34, w - 28, 2, ink);
+    V.pill_w = 0;
     if (state != NET_OFFLINE) {
       snprintf(line, sizeof line, "Hotel: %s", net_server());
-      text_fit(line, 11, SCREEN_W - 20);
-      text_draw(line, SCREEN_W / 2, SCREEN_H / 2 - 4, 11, rgb(0x8fd9ff, 255), 1);
-      /* No hotel on this Wi-Fi: the same build plays offline (the local simulation with bots). */
+      text_fit(line, 10, w - 28);
+      text_draw(line, x + 14, y + 68, 10, rgb(0x4d5b61, 255), 0);
+      /* No hotel on this Wi-Fi: the same build plays offline (the local simulation with bots).
+         Classic capsule, like every other button in the hotel. */
       snprintf(line, sizeof line, "%s - play offline", V.offline_key);
-      float w = text_width(line, 12) + 24;
-      V.pill_x = SCREEN_W / 2 - w / 2; V.pill_y = SCREEN_H / 2 + 20; V.pill_w = w; V.pill_h = 22;
-      fill_round(V.pill_x, V.pill_y, w, 22, 11, rgb(0x7fcf55, 255));
-      text_draw(line, SCREEN_W / 2, SCREEN_H / 2 + 24, 12, rgb(0x000000, 255), 1);
+      float bw = text_width(line, 12) + 30, bh = 24;
+      float bx = SCREEN_W / 2 - bw / 2, by = y + 90;
+      V.pill_x = bx; V.pill_y = by; V.pill_w = bw; V.pill_h = bh;
+      client_ui_capsule(bx, by, bw, bh, line);
     }
-    text_draw(V.platform, SCREEN_W / 2, SCREEN_H / 2 + 54, 11, rgb(0x8fd9ff, 255), 1);
+    text_draw(V.platform, SCREEN_W / 2, y + h - 19, 10, rgb(0x4d5b61, 255), 1);
+    client_ui_draw();
     return;
   }
+  if(pool_tower_view()){pool_draw_tower(now);client_ui_draw();return;}
   camera(now);
   if (V.scene) {
-    for (int i = 0; i < V.scene->count; i++)
-      if (V.scene->sprites[i].background) {
+    for (int pass=0;pass<2;pass++) for (int i = 0; i < V.scene->count; i++)
+      if (V.scene->sprites[i].background && (V.scene->sprites[i].role==1)==(pass==0)) {
         const SceneSprite *sp = &V.scene->sprites[i];
         gfx_scene_sprite(sp, scr_x(sp->x), scr_y(sp->y), V.zoom, sp->alpha);
       }
@@ -602,6 +576,7 @@ void show_frame(u64 now) {
     for (int i = 0; i < V.scene->count && n < COUNT(list); i++) {
       const SceneSprite *sp = &V.scene->sprites[i];
       if (sp->background) continue;
+      if(sp->role>=10 && ((sp->role&1)!=pool_switch_closed((sp->role-10)/2)))continue;
       if (sp->frames > 1 && sp->frame != (now / 120) % sp->frames) continue;
       list[n] = (Drawable){sp->depth, n, NULL, NULL, NULL, sp};
       n++;
@@ -609,20 +584,49 @@ void show_frame(u64 now) {
   }
   for (int i = 0; i < MAX_ENTS && n < COUNT(list); i++) {
     const Ent *e = &W.ents[i];
-    if (!e->used) continue;
+    if (!e->used || pool_hides(e)) continue;
     float px, py;
     ent_pos(e, now, &px, &py);
     PoseInfo p = pose_of(e, now, ent_moving(e, now));
     list[n] = (Drawable){px + py + .002f + p.depth + ent_height(e, now) / 1024, n, NULL, NULL, e, NULL};
     n++;
   }
+  for(int i=0;i<pets_count() && n<COUNT(list);i++) {
+    const Pet *pet=pet_at(i);float px,py;pet_pos(pet,now,&px,&py);
+    list[n]=(Drawable){.depth=px+py+.001f+pet->z/1024.f,.seq=n,.pet=pet};n++;
+  }
   qsort(list, (size_t)n, sizeof *list, by_depth);
   for (int i = 0; i < n; i++) {
     if (list[i].ent) draw_ent(list[i].ent, now);
+    else if(list[i].pet) {
+      float px,py,sx,sy;pet_pos(list[i].pet,now,&px,&py);iso(px,py,&sx,&sy);
+      pet_draw(list[i].pet,now,scr_x(sx),scr_y(sy),V.zoom);
+    }
     else if (list[i].layer) gfx_scene_sprite(list[i].layer, scr_x(list[i].layer->x), scr_y(list[i].layer->y), V.zoom, list[i].layer->alpha);
     else draw_item_part(list[i].item, list[i].part);
   }
   if (V.log_stage_world) { V.log_stage_world = false; dbg_log("room: world drawn (%d pieces)", n); }
+  const BuildGhost *ghost=client_shop_ghost();
+  if(ghost->on) {
+    float sx,sy;iso(ghost->x,ghost->y,&sx,&sy);
+    u32 ink=rgba(ghost->ok?0x4bc780:0xec655b,180);
+    int w,h;def_size(ghost->def,ghost->rot,&w,&h);
+    for(int y=0;y<h;y++)for(int x=0;x<w;x++) {
+      float px,py;iso(ghost->x+x,ghost->y+y,&px,&py);
+      float cx=scr_x(px),cy=scr_y(py),hw=HALF_W*V.zoom,hh=HALF_H*V.zoom;
+      draw_line(cx-hw,cy,cx,cy-hh,ink);draw_line(cx,cy-hh,cx+hw,cy,ink);
+      draw_line(cx+hw,cy,cx,cy+hh,ink);draw_line(cx,cy+hh,cx-hw,cy,ink);
+    }
+    const FurniVariant *variant=variant_get(ghost->def,ghost->rot,0);
+    if(variant)for(int i=0;i<variant->count;i++) {
+      const FurniPart *p=&variant->parts[i];
+      gfx_furni(ghost->def,p,scr_x(sx+p->ox),scr_y(sy+p->oy-ghost->z),V.zoom,rgba(0xffffff,150));
+    }
+  }
+  /* Like 3DS, device markers overlay furniture and foreground room layers. */
+  for (int i = 0; i < MAX_ENTS; i++)
+    if (W.ents[i].used && !pool_hides(&W.ents[i])) draw_ent_badge(&W.ents[i], now);
+  pool_draw_room(now);
   draw_bubbles(now);
   draw_ui(now);
   if (V.log_stage_frame) { V.log_stage_frame = false; dbg_log("room: first frame drawn"); }
@@ -632,6 +636,7 @@ void show_frame(u64 now) {
 // ------------------------------------------------------------------ input
 
 void show_walk(int dx, int dy) {
+  if (client_ui_move(dx, dy)) return;
   Ent *me = world_ent(W.me);
   if (!me || !W.in_room || (dx == 0 && dy == 0)) return;
   int x = me->x + dx, y = me->y + dy;
@@ -639,6 +644,7 @@ void show_walk(int dx, int dy) {
 }
 
 void show_tap(float x, float y) {
+  if (client_ui_tap(x, y)) return;
   if (!W.in_room) {
     if (net_state() != NET_OFFLINE && V.pill_w > 0 && x >= V.pill_x - 6 && x <= V.pill_x + V.pill_w + 6 &&
         y >= V.pill_y - 6 && y <= V.pill_y + V.pill_h + 6)
@@ -648,6 +654,7 @@ void show_tap(float x, float y) {
   float sx = x / V.zoom - roundf(V.cam_x), sy = y / V.zoom - roundf(V.cam_y);
   int tx = (int)lroundf((sx / HALF_W + sy / HALF_H) / 2);
   int ty = (int)lroundf((sy / HALF_H - sx / HALF_W) / 2);
+  if(client_shop_building()) {client_shop_tile(tx,ty);return;}
   if (tx >= 0 && ty >= 0 && tx < W.w && ty < W.h && world_tile(tx, ty)) send_walk(tx, ty);
 }
 
@@ -659,17 +666,20 @@ void show_toast(const char *text, u64 now) {
   toast_until = now + 6000;
 }
 
-void on_room(void) { show_room_changed(now_ms()); }
-void on_chat(u32 eid, const char *text) { show_chat(eid, text, now_ms()); }
-void on_notice(const char *text) { show_toast(text, now_ms()); }
+void on_room(void) { show_room_changed(now_ms()); client_ui_room(); }
+void on_chat(u32 eid, const char *text) {
+  Ent *e=world_ent(eid);if(e && client_social_blocked(e->guest))return;
+  show_chat(eid, text, now_ms()); client_ui_chat(eid, text);
+}
+void on_notice(const char *text) {client_shop_notice(text);client_pets_notice(text);client_trade_notice(text); show_toast(text, now_ms()); }
 void on_kicked(const char *text) { show_toast(text, now_ms()); net_goto("lobby", ""); }
 void on_transfer(const char *slug, const char *arrival) { net_goto(slug, arrival); }
 void on_alert(const char *json) { (void)json; }
-void on_casino(const char *json) { (void)json; }
-void on_snow(const u8 *data, int len) { (void)data; (void)len; }
-void on_social_changed(void) {}
+void on_casino(const char *json) {client_casino_receive(json);}
+void on_snow(const u8 *data, int len) { client_snow_receive(data,len); }
+void on_social_changed(void) {client_social_push();}
 void on_name_changed(u32 eid) { (void)eid; }
-void on_item(u32 id) { (void)id; }
+void on_item(u32 id) {client_shop_item(id);}
 
 /* Offline profile for the local simulation (sim.c). */
 void profile_load(char *name, int cap, u64 *look, u32 *credits) {
@@ -691,13 +701,16 @@ void profile_save(const char *name, u64 look, u32 credits) {
 }
 
 void show_action(int action) {
+  if (client_ui_action(action)) return;
   switch (action) {
     case SHOW_A: {
+      char context[100];
+      if(net_online()&&pool_context(context,sizeof context,now_ms())){pool_context_run(now_ms());break;}
+      if(net_online()&&client_bar_context(context,sizeof context,now_ms())){client_ui_bar();break;}
+      if(net_online()&&client_music_context(context,sizeof context,now_ms())){client_ui_music();break;}
       const Item *near = nearby_furniture();
       if (near) {
-        const FurniDef *d = def_get(near->def);
-        if (d && (d->kind == KIND_SIT || d->kind == KIND_FLOOR)) send_gesture(GESTURE_SIT);
-        else send_use(near->id);
+        client_ui_inspect(near->id);
       } else {
         Ent *me = world_ent(W.me);
         send_gesture((me && (me->flags & FLAG_SIT)) ? 0 : GESTURE_WAVE);
@@ -705,17 +718,26 @@ void show_action(int action) {
       break;
     }
     case SHOW_B:
-      V.cast = (V.cast + 1) % COUNT(CAST);
-      V.next_look = now_ms() + LOOK_MS;
-      send_look(look_encode(&CAST[V.cast]));
       break;
     case SHOW_X: send_gesture(GESTURE_WAVE); break;
     case SHOW_Y: send_chat(V.hello); break;
     case SHOW_L: V.zoom = 1; V.snapped = false; break;
     case SHOW_R: V.zoom = 2; V.snapped = false; break;
-    case SHOW_OFFLINE:
-      /* The proof of concept only knows the hotel of the local network it was built for. */
-      net_set_server(strcmp(net_server(), "offline") ? "offline" : DEFAULT_SERVER);
+    case SHOW_OFFLINE: {
+      static char hotel[128];
+      if (!strcmp(net_server(), "offline")) net_set_server(hotel[0] ? hotel : DEFAULT_SERVER);
+      else {
+        snprintf(hotel, sizeof hotel, "%s", net_server());
+        net_set_server("offline");
+      }
+      client_ui_reset();
       break;
+    }
   }
 }
+
+float show_zoom(void){return V.zoom;}
+void show_to_screen(float wx,float wy,float *x,float *y){*x=scr_x(wx);*y=scr_y(wy);}
+void on_activity(const char *json){if(!client_bar_receive(json,now_ms()))pool_receive(json,now_ms());}
+
+void on_music(const char *json){client_music_receive(json,now_ms());}

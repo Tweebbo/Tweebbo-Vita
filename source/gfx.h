@@ -32,6 +32,8 @@ void gfx_font_sprite(int sx, int sy, int sw, int sh, float x, float y, bool flip
 void gfx_furni(u16 def, const FurniPart *part, float x, float y, float scale, u32 color);
 /** Preloads a furniture texture (when entering a room). */
 void gfx_furni_preload(u16 def);
+void gfx_pet_preload(int palette);
+void gfx_pet(int palette,const PetPart *part,float x,float y,float scale,bool flip,u32 color,bool solid);
 /** Pre-rendered background of a classic room; NULL if not packed. */
 const RoomBackground *gfx_room(const char *model);
 void gfx_room_release(void);
@@ -41,6 +43,9 @@ const Scene *gfx_scene(const char *model);
 void gfx_scene_sprite(const SceneSprite *s, float x, float y, float zoom, u8 alpha);
 void gfx_filter(bool linear);
 void gfx_additive(bool on);
+bool gfx_snow_load(void);
+void gfx_snow_free(void);
+void gfx_snow_sprite(unsigned id,float x,float y,float kx,float ky,u32 color,float left,float top,float right,float bottom);
 
 void fill_rect(float x, float y, float w, float h, u32 color);
 void fill_round(float x, float y, float w, float h, float r, u32 color);
@@ -55,3 +60,7 @@ float text_draw(const char *s, float x, float y, float size, u32 color, int alig
 float text_width(const char *s, float size);
 /** Cuts `s` with "…" so it does not exceed `max` pixels. */
 void text_fit(char *s, float size, float max);
+
+const SceneArt *gfx_art(const char *name);
+void gfx_art_draw(const SceneArt *a,float x,float y,float kx,float ky,u32 color);
+void gfx_sprite_transform(float x,float y,float kx,float ky);

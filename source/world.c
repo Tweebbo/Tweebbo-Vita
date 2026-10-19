@@ -114,6 +114,23 @@ static void read_item(Reader *r, Item *it) {
   it->z = r_u16(r);
 }
 
+static u8 remembered_device(u32 id) {
+  for (int i = 0; i < MAX_ENTS; i++) if (W.devices[i].id == id) return W.devices[i].kind;
+  return 0;
+}
+
+static void remember_device(u32 id, u8 kind) {
+  if (!id) return;
+  int slot = -1;
+  for (int i = 0; i < MAX_ENTS; i++) {
+    if (W.devices[i].id == id) { slot = i; break; }
+    if (!W.devices[i].id && slot < 0) slot = i;
+  }
+  if (slot < 0) return;
+  W.devices[slot].id = kind ? id : 0;
+  W.devices[slot].kind = kind;
+}
+
 static void read_ent(Reader *r, Ent *e) {
   memset(e, 0, sizeof *e);
   e->used = true;
@@ -123,6 +140,11 @@ static void read_ent(Reader *r, Ent *e) {
   e->look = r_var(r);
   e->z = r_u16(r);
   e->guest = (u32)r_var(r);
+  e->device = remembered_device(e->id);
+#ifdef TWEEBBO_DEVICE
+  /* A resumed session may omit unchanged DEVICE announcements. */
+  if (e->id == W.me) e->device = TWEEBBO_DEVICE;
+#endif
   e->fx = e->x; e->fy = e->y; e->fz = e->z;
   e->next_x = e->next_y = 255;
   e->move_dir = -1;
@@ -151,8 +173,10 @@ void world_handle(const u8 *data, int len) {
       r_str(&r, W.name, sizeof W.name);
       r_str(&r, W.token, sizeof W.token);
       W.credits = (u32)r_var(&r);
+      W.chips = 0;
       W.guest_id = (u32)r_var(&r);
       break;
+    case S_CHIPS: W.chips = (u32)r_var(&r); break;
     case S_ROOM: {
       W.room_rights = W.room_owner = false;
       r_str(&r, W.slug, sizeof W.slug);
@@ -198,16 +222,22 @@ void world_handle(const u8 *data, int len) {
       break;
     }
     case S_ENTITY_REMOVE: {
-      Ent *e = world_ent((u32)r_var(&r));
+      u32 id = (u32)r_var(&r);
+      Ent *e = world_ent(id);
       if (e) e->used = false;
+      remember_device(id, 0);
       break;
     }
     case S_DEVICE:
       // Native device of each player (3DS/Switch/Vita); old servers never send it.
       for (int n = (int)r_var(&r); n > 0 && !r.err; n--) {
-        Ent *e = world_ent((u32)r_var(&r));
+        u32 id = (u32)r_var(&r);
         u8 device = r_u8(&r);
-        if (e && !r.err) e->device = device;
+        if (!r.err) {
+          remember_device(id, device);
+          Ent *e = world_ent(id);
+          if (e) e->device = device;
+        }
       }
       break;
     case S_DELTAS:
@@ -262,8 +292,16 @@ void world_handle(const u8 *data, int len) {
       break;
     }
     case S_SOCIAL_CHANGED: on_social_changed(); break;
+    case S_TRADE: {
+      u64 n=r_var(&r);char *next=NULL;
+      if(!r.err && n<=8192 && n==(u64)(r.len-r.p)) {
+        next=malloc((size_t)n+1);
+        if(next){memcpy(next,r.b+r.p,(size_t)n);next[n]=0;}
+      }
+      free(W.trade_json);W.trade_json=next;W.trade_rev++;break;
+    }
     case S_PETS: set_json(&W.pets_json, &r); break;
-    case S_PET_INVENTORY: set_json(&W.pet_inv_json, &r); break;
+    case S_PET_INVENTORY: set_json(&W.pet_inv_json, &r);if(!r.err)W.pet_inv_rev++;break;
     case S_GAME: {
       u8 op = r_u8(&r);
       if (op == 1 || op == 4) {
@@ -307,6 +345,8 @@ void world_handle(const u8 *data, int len) {
       if (event) { on_casino(event); free(event); }
       break;
     }
+    case S_MUSIC: {char *event=NULL;set_json(&event,&r);if(event){on_music(event);free(event);}break;}
+    case S_ACTIVITY: {char *event=NULL;set_json(&event,&r);if(event){on_activity(event);free(event);}break;}
     case S_SNOW: on_snow(r.b+r.p,r.len-r.p); break;
     case S_FINISH:
       r_str(&r, W.wall, sizeof W.wall);

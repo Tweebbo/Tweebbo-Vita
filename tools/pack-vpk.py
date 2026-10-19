@@ -21,6 +21,10 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as zf:
         zf.write(path, "sce_sys/livearea/contents/" + os.path.basename(path))
     for path in sorted(glob.glob("romfs/gfx/*.png")):
         zf.write(path, "gfx/" + os.path.basename(path))
+    for path in sorted(glob.glob("romfs/snow/*")):
+        zf.write(path, "snow/" + os.path.basename(path))
     zf.write("romfs/furni.pak", "furni.pak")
+    for path in sorted(glob.glob("romfs/spaces/*")):
+        zf.write(path, "spaces/" + os.path.basename(path))
 
 print(f"VPK stored: {out} ({os.path.getsize(out)} bytes)")

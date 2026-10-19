@@ -1,0 +1,8 @@
+Source origin and archive SHA-256 are recorded in ORIGIN; see LICENSE for the MIT license.
+Local portability changes: disable OS-thread Atomics on __3DS__; use the custom
+allocator supplied by the Snow Storm host rather than an unavailable malloc_usable_size.
+No quickjs-libc module, file access, process execution or network APIs are exposed.
+
+Switch/Vita: the same Atomics and default-allocator portability guards also
+apply to __SWITCH__ and __vita__. Keep -fwrapv -fno-strict-aliasing when compiling
+the engine. The portable Snow host supplies the bounded allocator.

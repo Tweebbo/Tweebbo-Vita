@@ -39,8 +39,9 @@ static ThreadHandle spawn(void (*fn)(void *)) {
   pthread_attr_t attr;
   pthread_attr_init(&attr);
   pthread_attr_setstacksize(&attr, 512 * 1024);
-  pthread_create(t, &attr, trampoline, (void *)fn);
+  int rc = pthread_create(t, &attr, trampoline, (void *)fn);
   pthread_attr_destroy(&attr);
+  if (rc) { free(t); return NULL; }
   return t;
 }
 static void join(ThreadHandle t) { if (t) { pthread_join(*t, NULL); free(t); } }
@@ -82,6 +83,8 @@ typedef struct {
   int id;
   bool queued, done, prod;
   char method[8], path[160];
+  char token[80];
+  Endpoint endpoint;
   char *json;
   bool auth;
   HttpResult res;
@@ -91,7 +94,7 @@ static struct {
   bool started, offline, quit;
   Mutex mu;
   ThreadHandle thread, http_thread;
-  char server[128];
+  char server[128], session_server[128];
   Endpoint ep;
   // Protected by mu:
   char slug[64], arrival[80], token[80], password[65];
@@ -109,6 +112,13 @@ static struct {
   // Another tab or device took over this character: do not reconnect until net_resume().
   bool replaced;
 } N;
+
+bool net_cancelled(void) {
+  lock(&N.mu);
+  bool quit = N.quit;
+  unlock(&N.mu);
+  return quit;
+}
 
 static void set_state(NetState s, const char *text) {
   lock(&N.mu);
@@ -189,17 +199,17 @@ static bool is_blocked(void) {
 static void net_thread(void *arg) {
   (void)arg;
   int failures = 0;
-  while (!N.quit) {
+  while (!net_cancelled()) {
     if (is_blocked()) {
       lock(&N.mu); N.state = N.blocked; unlock(&N.mu);
-      while (is_blocked() && !N.quit) sleep_ms(50);
+      while (is_blocked() && !net_cancelled()) sleep_ms(50);
       failures = 0;
       continue;
     }
     if (is_replaced()) {
       // Reconnecting now would evict the other session, which would evict us again.
       set_state(NET_REPLACED, "Tweebbo is open on another device or browser.");
-      while (is_replaced() && !N.quit) sleep_ms(50);
+      while (is_replaced() && !net_cancelled()) sleep_ms(50);
       failures = 0;
       continue;
     }
@@ -226,7 +236,7 @@ static void net_thread(void *arg) {
       continue;
     }
     Writer w;
-    w_begin(&w, C_HELLO); w_u16(&w, PROTOCOL_VERSION); w_str(&w, token); w_str(&w, arrival); w_u8(&w, PLATFORM_3DS); w_str(&w, password); w_u8(&w, NATIVE_STATUS | NATIVE_ROOMMOD); w_u8(&w, TWEEBBO_DEVICE);
+    w_begin(&w, C_HELLO); w_u16(&w, PROTOCOL_VERSION); w_str(&w, token); w_str(&w, arrival); w_u8(&w, PLATFORM_3DS); w_str(&w, password); w_u8(&w, NATIVE_STATUS | NATIVE_ROOMMOD | NATIVE_GAMES | NATIVE_CASINO | NATIVE_SNOW | NATIVE_SNOW2); w_u8(&w, TWEEBBO_DEVICE); w_u8(&w, FEATURE_ECONOMY | FEATURE_ACTIVITIES | FEATURE_MUSIC);
     bool alive = ws_send(&ws, w.buf, w.len);
     lock(&N.mu);
     // The arrival ticket is only valid once.
@@ -271,12 +281,10 @@ static void net_thread(void *arg) {
 
 static void http_thread(void *arg) {
   (void)arg;
-  while (!N.quit) {
+  while (!net_cancelled()) {
     HttpJob *job = NULL;
     lock(&N.mu);
     for (int i = 0; i < MAX_HTTP && !job; i++) if (N.http[i].queued && !N.http[i].done) job = &N.http[i];
-    char token[80];
-    snprintf(token, sizeof token, "%s", N.token);
     unlock(&N.mu);
     if (!job) { sleep_ms(30); continue; }
     HttpResult res;
@@ -292,7 +300,7 @@ static void http_thread(void *arg) {
     }
     Endpoint prod;
     endpoint_parse(PROD_SERVER, &prod);
-    http_request(job->prod ? &prod : &N.ep, job->method, job->path, job->auth ? token : NULL, job->json, 20000, &res);
+    http_request(job->prod ? &prod : &job->endpoint, job->method, job->path, job->auth ? job->token : NULL, job->json, 20000, &res);
     lock(&N.mu);
     job->res = res;
     job->done = true;
@@ -304,21 +312,26 @@ static void http_thread(void *arg) {
 
 void sim_deliver(const u8 *data, int len) { world_handle(data, len); }
 
-static void start_offline(u64 now) {
+static void start_offline_room(const char *slug, u64 now) {
   N.offline = true;
   N.state = NET_OFFLINE;
-  snprintf(N.slug, sizeof N.slug, "lobby");
-  sim_start("newbie_lobby", now);
+  snprintf(N.slug, sizeof N.slug, "%s", slug && *slug ? slug : "lobby");
+  sim_start(N.slug, now);
   Writer w;
   w_begin(&w, C_HELLO); w_u16(&w, PROTOCOL_VERSION); w_str(&w, ""); w_str(&w, ""); w_u8(&w, PLATFORM_3DS);
   net_send(w.buf, w.len);
+  Ent *me = world_ent(W.me);
+  if (me) me->device = TWEEBBO_DEVICE;
 }
+
+static void start_offline(u64 now) { start_offline_room("lobby", now); }
 
 void net_start(u64 now) {
   if (!N.started) mutex_init(&N.mu);
   N.started = true;
   N.quit = false;
-  if (!store_load("server", N.server, sizeof N.server) || !N.server[0]) snprintf(N.server, sizeof N.server, DEFAULT_SERVER);
+  if (N.session_server[0]) snprintf(N.server, sizeof N.server, "%s", N.session_server);
+  else if (!store_load("server", N.server, sizeof N.server) || !N.server[0]) snprintf(N.server, sizeof N.server, DEFAULT_SERVER);
   if (!net_server_allowed(N.server)) snprintf(N.server, sizeof N.server, DEFAULT_SERVER);
 #ifdef TWEEBBO_LAN_ONLY
   // Proof of concept: every launch tries the hotel of the local network first; offline is
@@ -348,6 +361,10 @@ void net_start(u64 now) {
   snprintf(N.status, sizeof N.status, "Connecting…");
   N.thread = spawn(net_thread);
   N.http_thread = spawn(http_thread);
+  if (!N.thread || !N.http_thread) {
+    net_stop();
+    set_state(NET_RETRYING, "Could not start network workers. Restart or play offline.");
+  }
 }
 
 void net_stop(void) {
@@ -370,15 +387,25 @@ bool net_server_allowed(const char *url) {
   if (!endpoint_parse(url, &ep) || ep.tls || sscanf(ep.host, "%u.%u.%u.%u%c", &a, &b, &c, &d, &extra) != 4 || a > 255 || b > 255 || c > 255 || d > 255) return false;
   return a == 10 || a == 127 || (a == 192 && b == 168) || (a == 172 && b >= 16 && b <= 31) || (a == 169 && b == 254);
 #else
-  (void)url; return true;
+  // Public build: only the hotel it was built for, or offline. An address saved by a showcase
+  // build (a LAN hotel) would otherwise keep the console away from tweebbo.lol for good.
+  return !strcmp(url, "offline") || !strcmp(url, DEFAULT_SERVER);
 #endif
 }
 
 void net_set_server(const char *url) {
-  if (!net_server_allowed(url)) { on_notice("This build connects to private LAN addresses only."); return; }
+  if (!net_server_allowed(url)) {
+#if defined(TWEEBBO_DEBUG) || defined(TWEEBBO_LAN_ONLY)
+    on_notice("This build connects to private LAN addresses only.");
+#else
+    on_notice("This build connects to tweebbo.lol only. Use Offline to play without a hotel.");
+#endif
+    return;
+  }
   net_stop();
-  store_save("server", url);
-  free(W.pets_json); free(W.pet_inv_json); free(W.owners_json);
+  snprintf(N.session_server, sizeof N.session_server, "%s", url);
+  if (strcmp(url, "offline")) store_save("server", url);
+  free(W.pets_json); free(W.pet_inv_json); free(W.owners_json); free(W.rights_json); free(W.trade_json);
   memset(&W, 0, sizeof W);
   net_start(now_ms());
 }
@@ -441,7 +468,14 @@ const char *net_room(void) { return N.slug; }
 const char *net_token(void) { return N.token; }
 
 void net_goto(const char *slug, const char *arrival) {
-  if (N.offline) return;
+  if (N.offline) {
+    // Offline practice: the simulation hosts every public room, so changing rooms simply
+    // restarts it and rejoins with the saved local profile.
+    free(W.pets_json); free(W.pet_inv_json); free(W.owners_json); free(W.rights_json); free(W.trade_json);
+    memset(&W, 0, sizeof W);
+    start_offline_room(slug, now_ms());
+    return;
+  }
   lock(&N.mu);
   N.replaced = false;
   N.blocked = 0;
@@ -455,6 +489,7 @@ void net_goto(const char *slug, const char *arrival) {
   q_clear(&N.out);
   unlock(&N.mu);
   W.in_room = false;
+  memset(W.devices, 0, sizeof W.devices);
   store_save("room", slug);
 }
 
@@ -464,8 +499,8 @@ void net_use_token(const char *token) {
   N.replaced = false;
   N.blocked = 0;
   snprintf(N.token, sizeof N.token, "%s", token);
-  N.want_gen++;
-  q_clear(&N.in);
+  N.want_gen++;N.state=NET_CONNECTING;
+  q_clear(&N.in);q_clear(&N.out);
   unlock(&N.mu);
   char key[128];
   token_key(key, sizeof key);
@@ -485,6 +520,8 @@ int net_http(const char *method, const char *path, const char *json, bool auth) 
     j->id = id = ++N.next_http;
     snprintf(j->method, sizeof j->method, "%s", method);
     snprintf(j->path, sizeof j->path, "%s", path);
+    snprintf(j->token, sizeof j->token, "%s", N.token);
+    j->endpoint = N.ep;
     j->json = json ? strdup(json) : NULL;
     j->auth = auth;
     j->queued = true;
@@ -525,6 +562,7 @@ void send_walk(int x, int y) { SEND(w_begin(&w, C_WALK); w_u8(&w, (u32)x); w_u8(
 void send_chat(const char *text) { SEND(w_begin(&w, C_CHAT); w_str(&w, text)); }
 void send_gesture(int kind) { SEND(w_begin(&w, C_GESTURE); w_u8(&w, (u32)kind)); }
 void send_use(u32 item) { SEND(w_begin(&w, C_USE); w_var(&w, item)); }
+void send_use_op(u32 item,u8 op) { SEND(w_begin(&w, C_USE); w_var(&w, item); w_u8(&w, op)); }
 void send_look(u64 look) { SEND(w_begin(&w, C_SET_LOOK); w_var(&w, look)); }
 void send_name(const char *name) { SEND(w_begin(&w, C_SET_NAME); w_str(&w, name)); }
 void send_buy(u16 offer) { SEND(w_begin(&w, C_BUY); w_u16(&w, offer)); }
@@ -539,6 +577,7 @@ void send_rotate(u32 id) { SEND(w_begin(&w, C_ROTATE); w_var(&w, id)); }
 void send_redeem(u32 id) { SEND(w_begin(&w, C_REDEEM); w_var(&w, id)); }
 void send_drink(u32 item, int drink) { SEND(w_begin(&w, C_DRINK); w_var(&w, item); w_u8(&w, (u32)drink)); }
 void send_pet(const char *json) { SEND(w_begin(&w, C_PET); w_str(&w, json)); }
+void send_trade(const char *json) { SEND(w_begin(&w, C_TRADE); w_str(&w, json)); }
 
 void net_resume(void) {
   lock(&N.mu);
@@ -576,3 +615,7 @@ void send_decorate(int kind, const char *id) { SEND(w_begin(&w, C_DECORATE); w_u
 void send_game(int op, u32 a, int b, int c, int d) { SEND(w_begin(&w, C_GAME); w_u8(&w, op); w_var(&w, a); w_u8(&w, b); w_u8(&w, c); w_u8(&w, d)); }
 void send_room_mod(int op, u32 target, int length) { SEND(w_begin(&w, C_ROOM_MOD); w_u8(&w, op); w_var(&w, target); if (length) w_u8(&w, length)); }
 void send_casino(int op, int a, int b, int c) { SEND(w_begin(&w, C_CASINO); w_u8(&w, op); w_u8(&w, a); w_u8(&w, b); w_u8(&w, c)); }
+
+void send_activity(const char *json) { if(net_online()){SEND(w_begin(&w, C_ACTIVITY); w_str(&w,json));} }
+
+void send_music(const char *json){if(net_online()){SEND(w_begin(&w,C_MUSIC);w_str(&w,json));}}

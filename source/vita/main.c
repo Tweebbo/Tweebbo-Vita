@@ -1,4 +1,4 @@
-// Tweebbo for PlayStation Vita: showcase proof of concept.
+// Tweebbo for PlayStation Vita.
 // One 960×544 screen at a 2× integer canvas, vita2d renderer, SceNet sockets with mbedTLS;
 // plays in the same room as the web, the 3DS and the Switch (protocol v6 + device byte).
 #include <stdarg.h>
@@ -15,6 +15,8 @@
 #include "gfx.h"
 #include "net.h"
 #include "show.h"
+#include "client_pool.h"
+#include "client_ui.h"
 #include "world.h"
 
 #define DATA_DIR "ux0:data/Tweebbo"
@@ -100,7 +102,7 @@ static void input(SceCtrlData *pad, unsigned prev, bool *running) {
   if (down & SCE_CTRL_LTRIGGER) show_action(SHOW_L);
   if (down & SCE_CTRL_RTRIGGER) show_action(SHOW_R);
   if (down & SCE_CTRL_SELECT) show_action(SHOW_OFFLINE);
-  if (down & SCE_CTRL_START) *running = false;
+  if ((down & SCE_CTRL_START) && show_confirm_quit("START", now_ms())) *running = false;
 
   if (now < next) return;
   int dx = 0, dy = 0;
@@ -114,13 +116,13 @@ static void input(SceCtrlData *pad, unsigned prev, bool *running) {
   else if (pad->ly < 128 - 48) dy = -1;
   if (!dx && !dy) return;
   show_walk(dx, dy);
-  next = now + 180;
+  next = now + (pool_mode()==2 ? 80 : 180);
 }
 
 int main(void) {
   data_mkdir();
   log_start();
-  dbg_log("Tweebbo Vita showcase starting (v%s, build %s %s)", APP_VERSION, __DATE__, __TIME__);
+  dbg_log("Tweebbo Vita development client starting (v%s, build %s %s)", APP_VERSION, __DATE__, __TIME__);
   dbg_log("loader: main stack 0x%X, pthread stack 0x%X, newlib heap %u MB",
           sceUserMainThreadStackSize, _pthread_stack_default_user, _newlib_heap_size_user / (1024 * 1024));
   srand((unsigned)sceKernelGetProcessTimeWide());
@@ -144,6 +146,7 @@ int main(void) {
   bool running = true;
   unsigned prev = 0;
   bool first_frame = true;
+  bool touching = false;
   u64 last_beat = now_ms();
   while (running) {
     SceCtrlData pad;
@@ -154,11 +157,34 @@ int main(void) {
 
     SceTouchData touch;
     memset(&touch, 0, sizeof touch);
-    if (sceTouchPeek(SCE_TOUCH_PORT_FRONT, &touch, 1) > 0 && touch.reportNum > 0)
+    bool touched = sceTouchPeek(SCE_TOUCH_PORT_FRONT, &touch, 1) > 0 && touch.reportNum > 0;
+    if (touched && !touching)
       show_tap(touch.report[0].x / 4.0f, touch.report[0].y / 4.0f); /* 1920×1088 → 480×272 canvas */
+    touching = touched;
 
     u64 now = now_ms();
     net_update(now);
+    client_ui_update();
+#ifdef TWEEBBO_UI_TEST
+    static u64 test_start;
+    static int test_step;
+    if(W.in_room && !test_start)test_start=now;
+    if(test_start && test_step<11 && now-test_start>=4000+(u64)test_step*1000) {
+      const int actions[]={SHOW_Y,SHOW_A,SHOW_R,SHOW_A,SHOW_Y};
+      if(test_step<5) {
+        dbg_log("native UI exercise: action %d",test_step);
+        show_action(actions[test_step]);
+      } else if(test_step==5) {
+        Ent *me=world_ent(W.me);
+        dbg_log(me && me->talk_until>0?"OK: native keyboard message echoed by hotel":"FAIL: native keyboard chat echo missing");
+      } else if(test_step==6)show_tap(315,SCREEN_H-16);
+      else if(test_step==7)show_tap(100,178);
+      else if(test_step==8)show_tap(100,50);
+      else if(test_step==9)show_tap(195,103);
+      else dbg_log("OK: native pet preview input completed");
+      test_step++;
+    }
+#endif
     gfx_frame(); /* load furniture queued by the previous frame, outside the draw pass */
     gfx_begin();
     show_frame(now_ms());

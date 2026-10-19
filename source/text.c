@@ -37,8 +37,8 @@ static float bitmap_width(const char *s, int size) {
   float width = 0;
   while (*s) {
     const FontGlyph *g = glyph(utf8_next(&s), size);
-    if (!g) return -1;
-    width += g->advance;
+    if (!g) g = glyph('?', size);
+    if (g) width += g->advance;
   }
   return width;
 }
@@ -53,6 +53,7 @@ float text_draw(const char *s, float x, float y, float size, u32 color, int alig
   x = roundf(x); y = roundf(y);
   while (*s) {
     const FontGlyph *g = glyph(utf8_next(&s), px);
+    if (!g) g = glyph('?', px);
     if (!g) continue;
     gfx_font_sprite(g->x, g->y, g->w, g->h, x + g->left, y + px + g->top, false, color);
     x += g->advance;

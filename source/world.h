@@ -42,7 +42,7 @@ typedef struct {
 typedef struct { u32 from; u8 kind; } GameInvite;
 
 typedef struct {
-  u32 me, guest_id, credits, owner;
+  u32 me, guest_id, credits, chips, owner;
   InvItem inv[MAX_INV];
   int inv_n;
   /** Incremented on every inventory change (to refresh the interface). */
@@ -58,6 +58,9 @@ typedef struct {
   GameInvite invites[8];
   u32 game_rev;
   u32 pets_rev;
+  u32 pet_inv_rev;
+  char *trade_json;
+  u32 trade_rev;
   int online;
   char name[NAME_CAP], token[80];
   char slug[32], title[64], model[32], owner_name[NAME_CAP];
@@ -65,6 +68,7 @@ typedef struct {
   bool in_room;
   char rows[MAX_SIDE * MAX_SIDE];
   Ent ents[MAX_ENTS];
+  struct { u32 id; u8 kind; } devices[MAX_ENTS];
   Item items[MAX_ITEMS];
 } World;
 
@@ -104,3 +108,7 @@ void on_social_changed(void);
 void on_name_changed(u32 eid);
 /** ITEM_ADD / ITEM_UPDATE (confirmation of placing or moving). */
 void on_item(u32 id);
+
+void on_activity(const char *json);
+
+void on_music(const char *json);

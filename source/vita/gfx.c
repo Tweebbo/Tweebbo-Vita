@@ -1,17 +1,22 @@
 // Tweebbo Vita graphics: vita2d with nearest filtering and a 2× integer canvas.
 // Implements the gfx.h contract (ABGR colors — the native vita2d format).
 #include "gfx.h"
+#include "audio.h"
+#include "gen/snow_assets.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <vita2d.h>
 #include "common.h"
+#include "finishes.h"
+#include "client_shop.h"
 
-#define ATLAS_PAGES 5
+#define ATLAS_MAX 16
 /* Big enough for the busiest room (lobby_hall + players), so a frame never evicts what
    it is about to draw. Furniture lives in main memory (4 KB granularity), not CDRAM. */
 #define FURNI_CACHE 512
+#define FURNI_BYTES (64u * 1024 * 1024)
 /* vita2d's per-frame vertex pool (default 1 MB). Every draw is skipped once it runs low:
    vita2d writes the vertices through an unchecked pointer. */
 #define VERTEX_POOL (4 * 1024 * 1024)
@@ -19,9 +24,12 @@
 /* The Vita screen is 960×544: the 480×272 canvas fits it exactly at 2×. */
 #define S 2.0f
 
-static vita2d_texture *atlas[ATLAS_PAGES];
+static vita2d_texture *atlas[ATLAS_MAX];
 static vita2d_texture *font_tex;
+static vita2d_texture *pet_tex[32];
 static vita2d_texture *mask_tri_up, *mask_tri_down, *mask_disc;
+static float view_x,view_y,view_kx=1,view_ky=1;
+void gfx_sprite_transform(float x,float y,float kx,float ky){view_x=x;view_y=y;view_kx=kx;view_ky=ky;}
 static bool additive;
 static int frame_draws, frame_skipped, max_draws;
 
@@ -32,16 +40,24 @@ static bool pool_ok(void) {
   return false;
 }
 
-typedef struct { u16 def; u8 page; bool used; vita2d_texture *tex; u32 stamp; } FurniTex;
+#include "furni-cache.h"
 static FurniTex furni_cache[FURNI_CACHE];
 static u32 furni_clock;
+static u32 furni_bytes;
+
+static void furni_evict(FurniTex *slot) {
+  if(slot->tex)vita2d_free_texture(slot->tex);
+  furni_bytes-=slot->bytes;
+  memset(slot,0,sizeof *slot);
+}
 
 /* Furniture queued during a frame; loaded at the start of the next one (GXM
    textures must not be created in the middle of a drawing pass). */
 static u16 pend_def[64];
 static int pend_n;
 
-static struct { vita2d_texture *tex[4]; const RoomBackground *bg; int pages; } room;
+static struct { vita2d_texture *tex[4]; const RoomBackground *bg; int pages; char wall[9],floor[9]; bool finish_attempted; } room;
+static void room_finish(void);
 static struct { vita2d_texture *tex[4]; const Scene *scene; int pages; } scene_v;
 
 /* PNG decoding goes through the vendored stb_image (no libpng/NEON at runtime):
@@ -165,12 +181,12 @@ bool gfx_init(void) {
   vita2d_init_advanced(VERTEX_POOL);
   vita2d_set_clear_color(RGBA8(0x0b, 0x0d, 0x0e, 255));
   dbg_log("gfx: vita2d ready");
-  static const char *pages[ATLAS_PAGES] = {"atlas0", "atlasg0", "atlasg1", "atlasg2", "atlasg3"};
-  for (int i = 0; i < ATLAS_PAGES; i++) {
+  // The export decides the atlas pages (atlas0..N and atlasg0..N).
+  for (int i = 0; i < atlas_page_count && i < ATLAS_MAX; i++) {
     char path[64];
-    snprintf(path, sizeof path, "app0:gfx/%s.png", pages[i]);
+    snprintf(path, sizeof path, "app0:gfx/%s.png", atlas_page_files[i]);
     atlas[i] = load_png(path);
-    dbg_log("gfx: %s %s", pages[i], atlas[i] ? "ok" : "missing");
+    dbg_log("gfx: %s %s", atlas_page_files[i], atlas[i] ? "ok" : "missing");
     if (!atlas[i] && i == 0) return false;
   }
   font_tex = load_png("app0:gfx/font0.png");
@@ -183,18 +199,25 @@ bool gfx_init(void) {
 }
 
 void gfx_exit(void) {
+  audio_exit();
   vita2d_wait_rendering_done();
-  for (int i = 0; i < ATLAS_PAGES; i++) if (atlas[i]) vita2d_free_texture(atlas[i]);
+  gfx_snow_free();
+  for(int i=0;i<COUNT(pet_tex);i++)if(pet_tex[i]){vita2d_free_texture(pet_tex[i]);pet_tex[i]=NULL;}
+  for (int i = 0; i < ATLAS_MAX; i++) if (atlas[i]) vita2d_free_texture(atlas[i]);
   if (font_tex) vita2d_free_texture(font_tex);
   if (mask_tri_up) vita2d_free_texture(mask_tri_up);
   if (mask_tri_down) vita2d_free_texture(mask_tri_down);
   if (mask_disc) vita2d_free_texture(mask_disc);
   gfx_room_release();
+  for(int i=0;i<FURNI_CACHE;i++)furni_evict(&furni_cache[i]);
+  if(pak.f)fclose(pak.f);
+  free(pak.idx);memset(&pak,0,sizeof pak);
   for (int i = 0; i < 4; i++) if (scene_v.tex[i]) { vita2d_free_texture(scene_v.tex[i]); scene_v.tex[i] = NULL; }
   vita2d_fini();
 }
 
 void gfx_frame(void) {
+  room_finish();
   /* Load the furniture queued during the previous frame (never mid-pass). */
   u16 defs[COUNT(pend_def)];
   int n = pend_n;
@@ -214,6 +237,11 @@ void gfx_begin(void) {
    while the GPU still reads them faults the GPU (the GPUCRASH dumps). The scene is light,
    so waiting costs nothing visible at 60 fps. */
 void gfx_present(void) {
+#ifdef TWEEBBO_UI_TEST
+  static unsigned frames;
+  if(frames%60==0)dbg_log("native frame %u: %d draws, %u bytes cached, pool %u",frames,frame_draws,furni_bytes,vita2d_pool_free_space());
+  frames++;
+#endif
   vita2d_end_drawing();
   vita2d_swap_buffers();
   vita2d_wait_rendering_done();
@@ -226,6 +254,7 @@ void gfx_present(void) {
 static void draw_tex(vita2d_texture *t, int sx, int sy, int sw, int sh, float x, float y, float kx, float ky, bool flip,
                      u32 color) {
   if (!t || sw <= 0 || sh <= 0 || kx == 0 || ky == 0 || !pool_ok()) return;
+  x=view_x+x*view_kx;y=view_y+y*view_ky;kx*=view_kx;ky*=view_ky;
   float dx = x * S, dy = y * S, ax = kx * S, ay = ky * S;
   if (flip) {
     /* Negative x scale mirrors the quad; adjust the origin so the sprite stays in place. */
@@ -236,36 +265,52 @@ static void draw_tex(vita2d_texture *t, int sx, int sy, int sw, int sh, float x,
 }
 
 void gfx_sprite(int page, int sx, int sy, int sw, int sh, float x, float y, float scale, bool flip, u32 color) {
-  if (page < 0 || page >= ATLAS_PAGES) return;
+  if (page < 0 || page >= atlas_page_count || !atlas[page]) return;
   draw_tex(atlas[page], sx, sy, sw, sh, x, y, scale, scale, flip, color);
 }
 
 void gfx_sprite_xy(int page, int sx, int sy, int sw, int sh, float x, float y, float kx, float ky, bool flip, u32 color) {
-  if (page < 0 || page >= ATLAS_PAGES) return;
+  if (page < 0 || page >= atlas_page_count || !atlas[page]) return;
   draw_tex(atlas[page], sx, sy, sw, sh, x, y, kx, ky, flip, color);
 }
 
 void gfx_sprite_solid(int page, int sx, int sy, int sw, int sh, float x, float y, float kx, float ky, bool flip, u32 color) {
   /* Approximate silhouette: the sprite multiplied by the veil color. */
-  if (page < 0 || page >= ATLAS_PAGES) return;
+  if (page < 0 || page >= atlas_page_count || !atlas[page]) return;
   draw_tex(atlas[page], sx, sy, sw, sh, x, y, kx, ky, flip, color);
 }
 
 void gfx_font_sprite(int sx, int sy, int sw, int sh, float x, float y, bool flip, u32 color) {
   draw_tex(font_tex, sx, sy, sw, sh, x, y, 1, 1, flip, color);
 }
+void gfx_pet_preload(int palette) {
+  if(palette<0 || palette>=pet_palette_count || palette>=COUNT(pet_tex) || pet_tex[palette])return;
+  char path[64];snprintf(path,sizeof path,"app0:gfx/pets_%d.png",palette);
+  vita2d_texture_set_alloc_memblock_type(SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE);
+  pet_tex[palette]=load_png(path);
+  vita2d_texture_set_alloc_memblock_type(SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW);
+}
+void gfx_pet(int palette,const PetPart *part,float x,float y,float scale,bool flip,u32 color,bool solid) {
+  (void)solid;
+  if(palette<0 || palette>=COUNT(pet_tex))return;
+  draw_tex(pet_tex[palette],part->x,part->y,part->w,part->h,x,y,scale,scale,flip,color);
+}
 
 static vita2d_texture *furni_fetch(u16 def, u16 page) {
-  FurniTex *slot = NULL, *victim = &furni_cache[0];
-  for (int i = 0; i < FURNI_CACHE; i++) {
-    FurniTex *c = &furni_cache[i];
-    if (c->used && c->def == def && c->page == page) { slot = c; break; }
-    if (!victim->used || victim->stamp > c->stamp) victim = c;
-  }
-  if (!slot) {
-    slot = victim;
-    if (slot->tex) vita2d_free_texture(slot->tex);
+  FurniTex *slot = furni_slot(furni_cache,FURNI_CACHE,def,page);
+  if (!slot->used || slot->def!=def || slot->page!=page) {
+    furni_evict(slot);
+    u32 bytes=0;
+    for(int i=0;i<furni_texture_count;i++)if(furni_textures[i].def==def && furni_textures[i].page==page)bytes=furni_textures[i].bytes;
+    if(bytes>FURNI_BYTES)return NULL;
+    while(furni_bytes+bytes>FURNI_BYTES) {
+      FurniTex *oldest=furni_oldest(furni_cache,FURNI_CACHE,slot);
+      if(!oldest)break;
+      furni_evict(oldest);
+    }
     slot->tex = furni_blob(def, page);
+    if(!slot->tex)dbg_log("furniture texture unavailable: %u page %u",def,page);
+    slot->bytes=slot->tex?bytes:0;furni_bytes+=slot->bytes;
     slot->def = def;
     slot->page = (u8)page;
     slot->used = true;
@@ -331,6 +376,27 @@ void gfx_room_release(void) {
   for (int i = 0; i < 4; i++) if (room.tex[i]) { vita2d_free_texture(room.tex[i]); room.tex[i] = NULL; }
   room.bg = NULL;
   room.pages = 0;
+  room.finish_attempted=false;
+}
+
+static void room_finish(void) {
+  const char *wall=client_shop_wall(),*floor=client_shop_floor();
+  if(!room.bg || (room.finish_attempted && !strcmp(room.wall,wall) && !strcmp(room.floor,floor)))return;
+  vita2d_texture *next[4]={0};bool ok=true;
+  for(int i=0;i<room.pages && ok;i++) {
+    char path[96];snprintf(path,sizeof path,"app0:gfx/%s.png",room.bg->tiles[i].file);
+    next[i]=load_png(path);
+    ok=next[i] && finishes_paint("app0:spaces",room.bg,i,wall,floor,
+      vita2d_texture_get_datap(next[i]),vita2d_texture_get_width(next[i]),
+      vita2d_texture_get_height(next[i]),vita2d_texture_get_stride(next[i]));
+  }
+  for(int i=0;i<room.pages;i++) {
+    if(ok) {vita2d_free_texture(room.tex[i]);room.tex[i]=next[i];}
+    else if(next[i])vita2d_free_texture(next[i]);
+  }
+  if(!ok)dbg_log("room finishes unavailable: %s",room.bg->model);
+  snprintf(room.wall,sizeof room.wall,"%s",wall);snprintf(room.floor,sizeof room.floor,"%s",floor);
+  room.finish_attempted=true;
 }
 
 void gfx_room_draw(const RoomBackground *bg, float x, float y, float scale) {
@@ -423,4 +489,33 @@ void draw_line(float x1, float y1, float x2, float y2, u32 color) {
     float t = steps ? (float)i / steps : 0;
     fill_rect(x1 + dx * t, y1 + dy * t, 1, 1, color);
   }
+}
+
+static vita2d_texture *snow_pages[12];
+static unsigned snow_loaded;
+void gfx_snow_free(void) {
+  while(snow_loaded) vita2d_free_texture(snow_pages[--snow_loaded]);
+}
+bool gfx_snow_load(void) {
+  if(snow_loaded==snow_page_count)return true;
+  gfx_snow_free();
+  if(snow_page_count>COUNT(snow_pages))return false;
+  for(unsigned i=0;i<snow_page_count;i++){
+    char path[128];snprintf(path,sizeof path,"app0:snow/%s.png",snow_page_files[i]);
+    vita2d_texture *p=load_png(path);
+    if(!p){gfx_snow_free();return false;}
+    snow_pages[snow_loaded++]=p;
+  }
+  return true;
+}
+#include "../snow_draw.inc"
+
+const SceneArt *gfx_art(const char *name){
+  if(!scene_v.scene)return NULL;
+  for(int i=0;i<scene_v.scene->art_count;i++)if(!strcmp(scene_v.scene->art[i].name,name))return &scene_v.scene->art[i];
+  return NULL;
+}
+void gfx_art_draw(const SceneArt *a,float x,float y,float kx,float ky,u32 color){
+  if(a && scene_v.scene && a->page<scene_v.pages && a->page<4)
+    draw_tex(scene_v.tex[a->page],a->sx,a->sy,a->w,a->h,x,y,kx,ky,false,color);
 }

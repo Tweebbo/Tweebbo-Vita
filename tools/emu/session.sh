@@ -7,7 +7,7 @@ export DISPLAY=:97
 sleep 1
 V3K=$CACHE/squashfs-root/AppRun
 LOG=$PWD/build/shots/vita3k.log
-"$V3K" -B OpenGL --frontend sdl "$VPK" >"$LOG" 2>&1 &
+"$V3K" -B "${BACKEND:-Vulkan}" --frontend sdl "$VPK" >"$LOG" 2>&1 &
 PID=$!
 start=$(date +%s)
 for t in $SHOTS; do

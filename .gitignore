@@ -12,3 +12,5 @@ __pycache__/
 romfs/furni.pak
 tools/emu-cache/
 build-offline/
+romfs/snow/
+romfs/spaces/
