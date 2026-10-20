@@ -486,7 +486,7 @@ void sim_start(const char *room_key, u64 now) {
   }
   for (int i = 0; i < S.model->item_count && i < SIM_ITEMS; i++) {
     const RoomItem *src = &S.model->items[i];
-    S.items[i] = (SItem){true, src->id, src->def, src->x, src->y, src->rot, 0, src->z};
+    S.items[i] = (SItem){true, src->id, src->def, src->x, src->y, src->rot, src->state, src->z};
   }
   S.next_eid = 1;
   S.next_guest = 1000;

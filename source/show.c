@@ -456,15 +456,16 @@ static const Item *nearby_furniture(void) {
   Ent *me = world_ent(W.me);
   if (!me) return NULL;
   const Item *best = NULL;
+  int best_d = 4;
   for (int i = 0; i < MAX_ITEMS; i++) {
     const Item *it = &W.items[i];
     if (!it->used) continue;
-    int dx = (int)it->x - me->x, dy = (int)it->y - me->y;
-    if (dx * dx + dy * dy > 2) continue;
+    int dx = (int)it->x - me->x, dy = (int)it->y - me->y, d2 = dx * dx + dy * dy;
+    if (d2 > 2 || d2 >= best_d) continue;
     const FurniDef *d = def_get(it->def);
     if (!interactive(d)) continue;
-    best = it;
-    if (dx == 0 && dy == 0) break;
+    best = it; best_d = d2;
+    if (d2 == 0) break;
   }
   return best;
 }
@@ -507,11 +508,7 @@ static void draw_ui(u64 now) {
 #else
       const char *key = "A";
 #endif
-      float gw = fmaxf(14, text_width(key, 10) + 8);
-      float pw = gw + 8 + text_width(use, 10) + 14;
-      float px = SCREEN_W - pw - 10, py = SCREEN_H - 64;
-      client_ui_panel(px, py, pw, 22);
-      client_ui_key_hint(key, use, px + 6, py + 4, 0, 0x18272a);
+      client_ui_prompt(key, use, SCREEN_W - 10, SCREEN_H - 58);
     }
   }
 }
@@ -728,9 +725,11 @@ void show_action(int action) {
       if(net_online()&&client_bar_context(context,sizeof context,now_ms())){client_ui_bar();break;}
       if(net_online()&&client_music_context(context,sizeof context,now_ms())){client_ui_music();break;}
       const Item *near = nearby_furniture();
-      if (near) {
-        client_ui_inspect(near->id);
-      } else {
+      const FurniDef *nd = near ? def_get(near->def) : NULL;
+      bool direct = net_online() && nd && (nd->kind == KIND_SIT || (nd->flags & (DEF_LAY | DEF_GATE | DEF_TELEPORTER)) || nd->kind == KIND_TOGGLE);
+      if (near && direct) send_use_op(near->id, 0);
+      else if (near) client_ui_inspect(near->id);
+      else {
         Ent *me = world_ent(W.me);
         send_gesture((me && (me->flags & FLAG_SIT)) ? 0 : GESTURE_WAVE);
       }

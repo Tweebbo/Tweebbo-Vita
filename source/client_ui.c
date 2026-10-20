@@ -82,9 +82,10 @@ static void copy(char *dst, size_t cap, const char *src) {
 // ---------------------------------------------------------------- Classic interface look
 // The same steel-blue windows, capsule buttons and light body as the web edition and the
 // 3DS client (client/public/classic), drawn over the shared room renderer.
-enum { CL_RIM=0x6794a7, CL_EDGE=0x36586b, CL_BODY=0xeeeeee, CL_MUTED=0x4d5b61,
+enum { CL_RIM=0x4f7486, CL_EDGE=0x36586b, CL_BODY=0xeeeeee, CL_MUTED=0x4d5b61,
        CL_SEL=0xcfe3ec, CL_FACE=0xf7f7f2, CL_FACE_OFF=0xdcdcd4, CL_SHADE=0xd2d2ca,
        CL_GOLD=0xffd34d, CL_DARK=0x2b3b42, CL_BAR=0x3a3a3a, CL_INK=0x18272a,
+       CL_PLACEHOLDER=0x6b6b6b, CL_DISABLED=0x5f5f5f,
        CL_RED=0xc1272d, CL_ONLINE=0x3aa83a };
 
 static u32 color_alpha(u32 c, u8 a) {
@@ -169,7 +170,7 @@ static bool pill(const char *base, const char *state, float x, float y, float w,
 static float pad_glyph_width(const char *key) {
   if (!strcmp(key, "Cross") || !strcmp(key, "Circle") || !strcmp(key, "Triangle") ||
       !strcmp(key, "Square") || !strcmp(key, "D-pad")) return 16;
-  return fmaxf(16, text_width(key, 10) + 10);
+  return fmaxf(16, text_width(key, 11) + 10);
 }
 #if TWEEBBO_DEVICE == 3
 /** PlayStation face symbol inside the light key. */
@@ -226,38 +227,49 @@ float client_ui_key_hint(const char *key, const char *text, float x, float y, u3
   (void)ink;
   pad_glyph(key, x, y);
   float w = pad_glyph_width(key);
-  text_draw(text, x + w + 5, y + 2, 10, color(text_ink), 0);
-  return x + w + 5 + text_width(text, 10) + 10;
+  text_draw(text, x + w + 5, y + 3, 11, color(text_ink), 0);
+  return x + w + 5 + text_width(text, 11) + 10;
 }
 static void hotspot(float x, float y, float w, float h, int cmd, int arg);
 static bool pill(const char *base, const char *state, float x, float y, float w, float h, u32 tint);
 /** One pad hint as a small classic button (the original button.b capsule, dark Verdana-like
  *  label, the pad glyph inside), like the hotel's own buttons; tappable when `cmd` is set. */
 static float hint_chip(const char *key, const char *text, float x, float y, int cmd, int arg) {
-  float gw = pad_glyph_width(key), w = gw + 6 + text_width(text, 10) + 14, h = 20;
+  float gw = pad_glyph_width(key), w = gw + 6 + text_width(text, 11) + 14, h = 22;
   int i = U.count;
   hotspot(x, y, w, h, cmd, arg);
-  if (cmd && U.panel && U.focus == i) fill_round(x-2, y-2, w+4, h+4, 8, color(CL_GOLD));
+  if (cmd && U.panel && U.focus == i) fill_round(x-2, y-2, w+4, h+4, 8, color(CL_EDGE));
   if (!pill("button.b", "active", x, y, w, h, 0xffffffff)) {
     fill_round(x, y, w, h, 6, color(CL_DARK));
     fill_round(x+1, y+1, w-2, h-2, 5, color(CL_FACE));
   }
-  pad_glyph(key, x + 6, y + 3);
-  text_draw(text, x + 6 + gw + 5, y + 4, 10, color(CL_INK), 0);
+  pad_glyph(key, x + 6, y + 4);
+  text_draw(text, x + 6 + gw + 5, y + 5, 11, color(CL_INK), 0);
   return x + w + 4;
 }
-/** Always-on control legend in the room: a row of classic hint buttons. */
+/** Always-on control legend in the room: a row of classic hint buttons, wrapped when needed. */
 static void room_hints(float margin) {
 #if TWEEBBO_DEVICE == 3
-  static const char *keys[] = {"Cross", "Triangle", "Square", "Circle"};
-  static const char *labels[] = {"Talk/use", "Chat", "Wave", "Rooms"};
+  static const char *keys[] = {"Cross", "Triangle", "Square", "Circle", "R-stick"};
+  static const char *labels[] = {"Talk/use", "Chat", "Wave", "Rooms", "Tools"};
 #else
-  static const char *keys[] = {"A", "Y", "X", "B", "L/R"};
-  static const char *labels[] = {"Talk/use", "Chat", "Wave", "Rooms", "Zoom"};
+  static const char *keys[] = {"A", "Y", "X", "B", "L/R", "ZL/ZR"};
+  static const char *labels[] = {"Talk/use", "Chat", "Wave", "Rooms", "Zoom", "Tools"};
 #endif
-  float x = margin + 8, y = margin + 8;
-  for (int i = 0; i < COUNT(keys); i++)
-    x = hint_chip(keys[i], labels[i], x, y, !strcmp(labels[i], "Rooms") ? OPEN : 0, ROOMS);
+  float hud = SCREEN_W >= 600 ? 252 : 168;
+  float start = margin + 8, x = start, y = margin + 8, max = SCREEN_W - margin - 16 - hud;
+  for (int i = 0; i < COUNT(keys); i++) {
+    float w = pad_glyph_width(keys[i]) + 6 + text_width(labels[i], 11) + 14;
+    if (x > start && x + w > max) { x = start; y += 26; }
+    int cmd = !strcmp(labels[i], "Rooms") || !strcmp(labels[i], "Tools") ? OPEN : 0;
+    int arg = !strcmp(labels[i], "Rooms") ? ROOMS : MORE;
+    x = hint_chip(keys[i], labels[i], x, y, cmd, arg);
+  }
+}
+/** The room's contextual prompt as the same classic capsule, with no panel border band. */
+void client_ui_prompt(const char *key, const char *text, float right, float y) {
+  float w = pad_glyph_width(key) + 6 + text_width(text, 11) + 14;
+  hint_chip(key, text, right - w, y, 0, 0);
 }
 /** Pad legend of the large windows, as classic hint buttons on the toolbar strip. */
 static void window_hints(float x,float y,bool rooms) {
@@ -287,7 +299,7 @@ static void button(float x, float y, float w, float h, const char *text, int cmd
   bool focused = enabled && U.panel && U.focus == i;
   bool selected = (cmd==CATEGORY && arg==U.category) || (cmd==SCOPE && arg==U.scope) || (cmd==OPEN && arg==U.panel);
   float r = fminf(h / 2.0f, 12.0f);
-  if (focused) fill_round(x-2, y-2, w+4, h+4, r+2, color(CL_GOLD));
+  if (focused) fill_round(x-2, y-2, w+4, h+4, r+2, color(CL_EDGE));
   u32 tint = enabled ? 0xffffffff : 0xffb4b4b4;
   if (!pill(h >= 20 ? "button.a" : "button.b", "active", x, y, w, h, tint)) {
     fill_round(x, y, w, h, r, color(CL_DARK));
@@ -295,14 +307,14 @@ static void button(float x, float y, float w, float h, const char *text, int cmd
   }
   if (selected) fill_round(x+4, y+3, fmaxf(w-8, 2), fmaxf(h-6, 2), fmaxf(r-2, 2), color_alpha(CL_SEL, 120));
   char t[384]; copy(t, sizeof t, text); text_fit(t, 12, w-10);
-  text_draw(t, x+w/2, y+(h-14)/2, 12, color(enabled ? CL_INK : 0x8f8f88), 1);
+  text_draw(t, x+w/2, y+(h-14)/2, 12, color(enabled ? CL_INK : CL_DISABLED), 1);
 }
 /** Original text field (field.*): white inset over the classic rim. */
 static void field(float x, float y, float w, float h, const char *text, const char *placeholder, int cmd, int arg) {
   int i = U.count;
   hotspot(x, y, w, h, cmd, arg);
   bool focused = cmd && U.panel && U.focus == i;
-  if (focused) fill_round(x-2, y-2, w+4, h+4, fminf((h+4)/2.0f, 12), color(CL_GOLD));
+  if (focused) fill_round(x-2, y-2, w+4, h+4, fminf((h+4)/2.0f, 12), color(CL_EDGE));
   fill_round(x, y, w, h, 4, color(0xffffff));
   if (!pill("field", NULL, x, y, w, h, 0xffffffff)) {
     fill_round(x, y, w, h, 4, color(0x7d7d7d));
@@ -310,11 +322,13 @@ static void field(float x, float y, float w, float h, const char *text, const ch
   }
   bool empty = !text || !text[0];
   char t[256]; copy(t, sizeof t, empty ? placeholder : text); text_fit(t, 12, w-12);
-  text_draw(t, x+7, y+(h-14)/2, 12, color(empty ? 0x8f8f88 : CL_INK), 0);
+  text_draw(t, x+7, y+(h-14)/2, 12, color(empty ? CL_PLACEHOLDER : CL_INK), 0);
 }
 /** Original 9-slice window with a centred title and the classic close box; registers CLOSE. */
 static void window_chrome(float x, float y, float w, float h, const char *title, bool closable) {
-  nine_slice("window.", x, y, w, h, 0xffffffff);
+  // Solid classic frame like the 3DS skin: black edge, steel-blue rim, light body.
+  fill_round(x, y, w, h, 6, color(CL_INK));
+  fill_round(x+1, y+1, w-2, h-2, 5, color(CL_RIM));
   fill_round(x+6, y+21, w-12, h-27, 5, color(CL_EDGE));
   fill_round(x+7, y+22, w-14, h-29, 4, color(CL_BODY));
   char t[384]; copy(t, sizeof t, title); text_fit(t, 12, w-46);
@@ -335,6 +349,7 @@ static const Tool TOOLS[] = {
   {"Games",     "games-icon",       OPEN,        GAMES},
   {"Casino",    "casino-icon",      GOTO_CASINO, 0},
   {"Help",      "help_icon@24",     OPEN,        HELP},
+  {"Support",   "badge-CLUB2",      OPEN,        SUPPORT},
 };
 static bool tool_on(const Tool *t) {
   if (t->cmd == OPEN_SHOP) return U.panel == SHOP && U.shop_kind == t->arg;
@@ -359,18 +374,20 @@ static void classic_tools(float margin, float bar) {
     hotspot(x, y, w, h, t->cmd, t->arg);
     bool on = tool_on(t);
     bool focused = U.panel && U.focus == idx;
-    if (on) fill_round(x+1, y, w-2, h-1, 4, color_alpha(0xffffff, 40));
+    bool support = t->cmd == OPEN && t->arg == SUPPORT;
+    if (support) fill_round(x+1, y, w-2, h-1, 4, color_alpha(CL_GOLD, on ? 64 : 30));
+    else if (on) fill_round(x+1, y, w-2, h-1, 4, color_alpha(0xffffff, 40));
     else if (focused) fill_round(x+1, y, w-2, h-1, 4, color_alpha(CL_GOLD, 70));
     float cx = x + w/2;
-    // The small Vita canvas keeps the bar icon-only: nine 10 px labels do not fit.
+    // The small Vita canvas keeps the bar icon-only: ten 11 px labels do not fit.
     bool show_label = SCREEN_W >= 600;
     float icy = show_label ? y+8 : y+12, box = show_label ? 22 : 24;
     if (t->cmd == OPEN && t->arg == ME && me)
       avatar_draw_head(me->look, 3, cx - ANCHOR_X*0.5f, (show_label ? y+7 : y+11) - 36*0.5f, 0.5f);
     else if (t->cmd == OPEN && t->arg == PETS) paw_icon(cx, icy, on ? CL_GOLD : 0xdddddd);
     else if (t->icon) ui_icon_fit(t->icon, cx, icy, box);
-    if (show_label) text_draw(t->label, cx, y+16, 10, color(on ? CL_GOLD : 0xdddddd), 1);
-    if (on) fill_rect(x+6, bar+30, w-12, 2, color(CL_GOLD));
+    if (show_label) text_draw(t->label, cx, y+15, 11, color(support || on ? CL_GOLD : 0xdddddd), 1);
+    if (on || support) fill_rect(x+6, bar+30, w-12, 2, color(CL_GOLD));
   }
 }
 /** The Casino's real-money chip (the web draws it in CSS). */
@@ -383,18 +400,19 @@ static void chip_icon(float cx, float cy, float r) {
 /** Top-right HUD, like the web's floating room window: room, players online, credits and chips. */
 static void classic_hud(float margin) {
   bool wide = SCREEN_W >= 600;
-  float w = wide ? 252 : 150;
+  float w = wide ? 252 : 168;
   float x = SCREEN_W - margin - 8 - w, y = 8, h = wide ? 50 : 28;
-  nine_slice("window.", x, y, w, h, 0xffffffff);
+  fill_round(x, y, w, h, 6, color(CL_INK));
+  fill_round(x+1, y+1, w-2, h-2, 5, color(CL_RIM));
   fill_round(x+6, y+6, w-12, h-12, 4, color(CL_EDGE));
   fill_round(x+7, y+7, w-14, h-14, 3, color(CL_BODY));
   char buf[32];
   if (wide) {
     label(W.in_room ? W.title : "Tweebbo", x+11, y+9, w-98, CL_INK);
     snprintf(buf, sizeof buf, "%d online", W.online);
-    float ox = x + w - 10 - text_width(buf, 10);
+    float ox = x + w - 10 - text_width(buf, 11);
     fill_round(ox-9, y+13, 6, 6, 3, color(CL_ONLINE));
-    text_draw(buf, ox, y+10, 10, color(CL_MUTED), 0);
+    text_draw(buf, ox, y+9, 11, color(CL_MUTED), 0);
     ui_icon("credits_icon@14", x+12, y+29);
     snprintf(buf, sizeof buf, "%u", (unsigned)W.credits);
     text_draw(buf, x+28, y+28, 12, color(CL_INK), 0);
@@ -405,18 +423,18 @@ static void classic_hud(float margin) {
   } else {
     snprintf(buf, sizeof buf, "%d", W.online);
     fill_round(x+10, y+11, 6, 6, 3, color(CL_ONLINE));
-    text_draw(buf, x+20, y+8, 10, color(CL_MUTED), 0);
+    text_draw(buf, x+20, y+7, 11, color(CL_MUTED), 0);
     ui_icon("credits_icon@14", x+46, y+7);
     snprintf(buf, sizeof buf, "%u", (unsigned)W.credits);
     text_draw(buf, x+60, y+6, 11, color(CL_INK), 0);
-    chip_icon(x+100, y+13, 7);
+    chip_icon(x+112, y+13, 7);
     snprintf(buf, sizeof buf, "%u", (unsigned)W.chips);
-    text_draw(buf, x+110, y+6, 11, color(CL_INK), 0);
+    text_draw(buf, x+122, y+6, 11, color(CL_INK), 0);
   }
   // The chips pill opens the chip shop window (QR to the PC edition). Over a panel it stays
   // available by touch and from Help, instead of a pad control of the panel.
-  U.chip_x = x+w-(wide?70:52); U.chip_y = y+(wide?26:3);
-  U.chip_w = wide?66:46; U.chip_h = 20;
+  U.chip_x = x+w-(wide?70:56); U.chip_y = y+(wide?26:3);
+  U.chip_w = wide?66:50; U.chip_h = 20;
   if (!U.panel) hotspot(U.chip_x, U.chip_y, U.chip_w, U.chip_h, OPEN, CHIPS);
 }
 /** The update window: offer, download progress and install instructions. */
@@ -551,10 +569,10 @@ float client_ui_sprite(const char *name,float x,float y,float scale) {
 void client_ui_arrow(float x,float y,float w,float h,const char *glyph,int cmd,int arg) {
   int i=U.count;hotspot(x,y,w,h,cmd,arg);
   bool focused=cmd && U.panel && U.focus==i;
-  if(focused)fill_round(x-2,y-2,w+4,h+4,5,color(CL_GOLD));
+  if(focused)fill_round(x-2,y-2,w+4,h+4,5,color(CL_EDGE));
   fill_round(x,y,w,h,3,color(CL_DARK));
   fill_round(x+1,y+1,w-2,h-2,2,color(cmd?CL_FACE:CL_FACE_OFF));
-  float cx=x+w/2,cy=y+h/2;u32 ink=color(cmd?CL_INK:0x9a9a92);
+  float cx=x+w/2,cy=y+h/2;u32 ink=color(cmd?CL_INK:CL_DISABLED);
   if(!strcmp(glyph,"<"))fill_triangle(cx+3,cy-5,cx+3,cy+5,cx-4,cy,ink);
   else if(!strcmp(glyph,">"))fill_triangle(cx-3,cy-5,cx-3,cy+5,cx+4,cy,ink);
   else if(!strcmp(glyph,"^"))fill_triangle(cx-5,cy+3,cx+5,cy+3,cx,cy-4,ink);
@@ -876,11 +894,11 @@ static int rooms_per_page(void) {
 static void nav_tab(float x,float y,float w,const char *text,bool on,int cmd,int arg) {
   int i=U.count;hotspot(x,y,w,22,cmd,arg);
   bool focused=cmd && U.focus==i;
-  if(focused)fill_round(x-2,y-2,w+4,26,6,color(CL_GOLD));
+  if(focused)fill_round(x-2,y-2,w+4,26,6,color(CL_EDGE));
   fill_round(x,y,w,24,4,color(CL_EDGE));
   fill_round(x+1,y+1,w-2,23,3,color(on?0xf5f5ec:0xd6d6cc));
   char t[64];copy(t,sizeof t,text);text_fit(t,11,w-8);
-  text_draw(t,x+w/2,y+5,11,color(cmd||on?CL_INK:0x8f8f88),1);
+  text_draw(t,x+w/2,y+5,11,color(cmd||on?CL_INK:CL_DISABLED),1);
 }
 /** Occupancy like the classic navigator: count plus a small bar, green to red. */
 static void occupancy(float rx,float y,int online) {
@@ -919,7 +937,7 @@ static void navigator(float x,float y,float w,float h) {
     bool focused=U.focus==hi;
     if(r->credits)fill_rect(ix+1,ry,iw-2,rh,color(0xfff1c4));
     else if(i%2)fill_rect(ix+1,ry,iw-2,rh,color(0xf1f5f6));
-    if(focused){fill_rect(ix+1,ry,iw-2,rh,color(0xcfe3ec));fill_rect(ix+1,ry,3,rh,color(CL_GOLD));}
+    if(focused){fill_rect(ix+1,ry,iw-2,rh,color(0xcfe3ec));fill_rect(ix+1,ry,3,rh,color(CL_EDGE));}
     if(i)fill_rect(ix+4,ry,iw-8,1,color(0xdde3e5));
     // Icon: featured rooms keep their navigator icon, locked rooms the classic door lock.
     float icx=ix+16,icy=ry+rh/2;
@@ -1144,6 +1162,7 @@ static void keyboard(float x,float y,float w) {
 
 void client_ui_draw(void) {
   U.count=0;
+  if(U.panel==POOL&&pool_mode()==1){pool_draw_booth();return;}
   if(U.panel==POOL&&(pool_mode()==2||pool_mode()==4)){pool_draw_hud();return;}
   if(U.panel==SNOW && client_snow_playing()){client_snow_hud();return;}
   float margin=U.tv?16:0, bar=SCREEN_H-32-margin;
@@ -1187,13 +1206,13 @@ void client_ui_draw(void) {
   char line[384];
   if(U.panel==KEYBOARD) keyboard(x,y,w);
   else if(U.panel==MORE) {
-    static const char *names[]={"People","Catalogue","Inventory","Room furniture","Friends","Games","Pets"};
-    static const int commands[]={OPEN,OPEN_SHOP,OPEN_SHOP,OPEN_SHOP,OPEN,OPEN,OPEN};
-    static const int args[]={PEOPLE,SHOP_CATALOGUE,SHOP_INVENTORY,SHOP_ROOM,SOCIAL,GAMES,PETS};
-    for(int i=0;i<COUNT(names);i++)button(x+8+(i%2)*148,y+28+(i/2)*42,146,34,names[i],commands[i],args[i]);
+    static const char *names[]={"People","Catalogue","Inventory","Room furniture","Friends","Games","Pets","Help","Support"};
+    static const int commands[]={OPEN,OPEN_SHOP,OPEN_SHOP,OPEN_SHOP,OPEN,OPEN,OPEN,OPEN,OPEN};
+    static const int args[]={PEOPLE,SHOP_CATALOGUE,SHOP_INVENTORY,SHOP_ROOM,SOCIAL,GAMES,PETS,HELP,SUPPORT};
+    for(int i=0;i<COUNT(names);i++)button(x+8+(i%2)*148,y+28+(i/2)*34,146,28,names[i],commands[i],args[i]);
     button(x+8,y+192,146,24,"Snow Storm",OPEN,SNOW);
     button(x+156,y+192,146,24,"Music / sound",OPEN,MUSIC);
-    if(W.room_owner)button(x+156,y+154,146,34,"Room settings",OPEN,SETTINGS);
+    if(W.room_owner)button(x+156,y+164,146,28,"Room settings",OPEN,SETTINGS);
   }
   else if(U.panel==SETTINGS) {
     bool owner=W.room_owner && net_online() && !strcmp(U.settings_room,W.slug);
@@ -1357,25 +1376,25 @@ void client_ui_draw(void) {
     float hy=y+30;
     client_ui_key_hint("Cross","Choose",x+10,hy,CL_INK,CL_INK);
     client_ui_key_hint("Circle","Close or Rooms",x+146,hy,CL_INK,CL_INK);
-    hy+=16;
+    hy+=18;
     client_ui_key_hint("Triangle","Chat",x+10,hy,CL_INK,CL_INK);
     client_ui_key_hint("Square","Wave",x+146,hy,CL_INK,CL_INK);
-    hy+=16;
+    hy+=18;
     client_ui_key_hint("L/R","Room zoom",x+10,hy,CL_INK,CL_INK);
     client_ui_key_hint("D-pad","Move",x+146,hy,CL_INK,CL_INK);
-    hy+=16;
+    hy+=18;
     label("The left stick and touch also work.",x+10,hy,w-20,CL_INK);
 #else
     float hy=y+30;
     client_ui_key_hint("A","Choose",x+10,hy,CL_INK,CL_INK);
     client_ui_key_hint("B","Close or Rooms",x+146,hy,CL_INK,CL_INK);
-    hy+=16;
+    hy+=18;
     client_ui_key_hint("Y","Chat",x+10,hy,CL_INK,CL_INK);
     client_ui_key_hint("X","Wave",x+146,hy,CL_INK,CL_INK);
-    hy+=16;
+    hy+=18;
     client_ui_key_hint("L/R","Room zoom",x+10,hy,CL_INK,CL_INK);
     client_ui_key_hint("D-pad","Move",x+146,hy,CL_INK,CL_INK);
-    hy+=16;
+    hy+=18;
     label(U.tv?"TV mode: every control works with a pad.":"The left stick and touch also work.",x+10,hy,w-20,CL_INK);
 #endif
     button(x+8,y+110,w-16,24,net_state()==NET_OFFLINE?RETURN_LABEL:"Play offline",OFFLINE,0);
@@ -1450,6 +1469,7 @@ bool client_ui_action(int action) {
     if(action==SHOW_R) { activate(SPACE,0);return true; }
   }
   if(U.panel==ROOMS && (action==SHOW_L || action==SHOW_R || action==SHOW_ZL || action==SHOW_ZR)) { activate(PAGE,action==SHOW_L||action==SHOW_ZL?-1:1); return true; }
+  if(!U.panel && (action==SHOW_ZL || action==SHOW_ZR)) { open_panel(MORE); return true; }
   if(action==SHOW_Y) { if(U.panel!=KEYBOARD){open_panel(CHAT);edit_text(EDIT_CHAT);} return true; }
   if(action==SHOW_B) { if(U.panel)activate(CLOSE,0);else open_panel(ROOMS);return true; }
   if(!U.panel)return false;

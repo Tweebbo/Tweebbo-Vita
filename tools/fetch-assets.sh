@@ -8,9 +8,9 @@ cd "$(dirname "$0")/.."
 SRC=${1:-../Tweebbo-3DS}
 [ -d "$SRC/build/export/data" ] || { echo "No $SRC/build/export: run ./build.sh export in Tweebbo-3DS first."; exit 1; }
 rm -rf build/pack-hd
-PACK_OUT="$PWD/build/pack-hd" PACK_HD=1 python3 "$SRC/tools/pack.py" "$SRC/build/export"
+PACK_OUT="$PWD/build/pack-hd" PACK_HD=1 PACK_STATE=1 python3 "$SRC/tools/pack.py" "$SRC/build/export"
 GFX="$PWD/build/pack-hd/gfx"
-for file in source/assets.h source/gen/font.c; do
+for file in source/gen/font.c; do
   [ -f "$SRC/$file" ] || { echo "Missing generated asset input: $SRC/$file"; exit 1; }
 done
 
@@ -26,9 +26,9 @@ cp "$GFX"/room_*.png romfs/gfx/ 2>/dev/null || true
 cp "$GFX"/scene_*.png romfs/gfx/ 2>/dev/null || true
 # Furniture textures (one PNG per definition page).
 cp "$GFX"/furni/*.png romfs/furni/
-# Sprite coordinates and texture pages must come from the same export.
+# Sprite coordinates and texture pages must come from the same export. The local
+# assets.h stays because the console RoomItem also carries the offline item state.
 mkdir -p source/gen
-cp "$SRC/source/assets.h" source/assets.h
 cp build/pack-hd/gen/assets.c build/pack-hd/gen/character_skins.h "$SRC/source/gen/font.c" source/gen/
 echo "romfs ready: $(ls romfs/gfx | wc -l) gfx files, $(ls romfs/furni | wc -l) furniture textures"
 

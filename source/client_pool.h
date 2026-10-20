@@ -33,6 +33,8 @@ void pool_context_run(u64 now);
 /** The bottom-screen controls are up (booth, diving, voting, Wobble Squabble). */
 bool pool_panel_active(void);
 void pool_draw_panel(float x,float y,float w);
+/** Classic full-screen changing booth (ph_swimsuit.window), with the room dimmed behind. */
+void pool_draw_booth(void);
 void pool_poll(u64 now);
 int pool_mode(void);
 bool pool_key(int action);

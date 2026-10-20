@@ -41,6 +41,9 @@ static struct {
   s64 splash_key; float splash_x, splash_y; u64 splash_at;
 } P;
 
+static int booth_pick = 0;
+static bool was_booth = false;
+
 static s64 server_now(u64 now) { return (s64)now + P.offset; }
 static bool model_is(const char *m) { return !strcmp(W.model, m); }
 bool pool_room(void) { return model_is("pool_a") || model_is("pool_b") || model_is("md_a"); }
@@ -91,6 +94,14 @@ void pool_receive(const char *text, u64 now) {
     s->bx = s->booth ? (u8)json_integer_value(json_array_get(b, 0)) : 0;
     s->by = s->booth ? (u8)json_integer_value(json_array_get(b, 1)) : 0;
   }
+  bool mine_booth = false;
+  for (int k = 0; k < P.swimmer_n; k++) if (P.swimmers[k].eid == W.me && P.swimmers[k].booth) mine_booth = true;
+  if (mine_booth && !was_booth) {
+    int current = pool_swimsuit(W.me);
+    booth_pick = current >= 0 ? current : 0;
+    client_ui_changed();
+  }
+  was_booth = mine_booth;
   size_t i;
   P.dive_queue_n = P.wobble_queue_n = 0;
   json_array_foreach(json_object_get(st, "dive_queue"), i, v) if (P.dive_queue_n < MAX_QUEUE) P.dive_queue[P.dive_queue_n++] = (u32)json_integer_value(v);
@@ -431,14 +442,18 @@ static void outfit(int color) {
   else snprintf(json, sizeof json, "{\"op\":\"outfit\",\"color\":%d}", color);
   command(json);
 }
-static int booth_pick = 0;
-
-enum { OUTFIT=8000, LEAVE, DIVE, WOBBLE, VOTE };
+enum { OUTFIT=8000, LEAVE, DIVE, WOBBLE, VOTE, BOOTH_LEFT, BOOTH_RIGHT, BOOTH_EXIT, BOOTH_SWIM };
 int pool_mode(void){return net_online() && pool_room() && P.known ? hud():HUD_NONE;}
 void pool_leave(void){command("{\"op\":\"leave\"}");}
 void pool_action(int cmd,int arg){
   int mode=pool_mode();if(!mode)return;
   if(cmd==LEAVE)pool_leave();
+  if(mode==HUD_BOOTH) {
+    if(cmd==BOOTH_LEFT) {booth_pick=(booth_pick+15)%16;client_ui_changed();return;}
+    if(cmd==BOOTH_RIGHT) {booth_pick=(booth_pick+1)%16;client_ui_changed();return;}
+    if(cmd==BOOTH_EXIT) {outfit(-1);return;}
+    if(cmd==BOOTH_SWIM) {outfit(booth_pick);return;}
+  }
   if(cmd==OUTFIT && mode==HUD_BOOTH && arg>=-1&&arg<16){booth_pick=arg<0?0:arg;outfit(arg);}
   if(cmd==DIVE && mode==HUD_DIVE && arg>=1&&arg<=8)dive_move(arg);
   if(cmd==WOBBLE && mode==HUD_WOBBLE && arg>=1&&arg<=7)wobble_move(arg);
@@ -446,6 +461,13 @@ void pool_action(int cmd,int arg){
 }
 bool pool_key(int action){
   int mode=pool_mode();
+  if(mode==HUD_BOOTH){
+    if(action==SHOW_L) {pool_action(BOOTH_LEFT,0);return true;}
+    if(action==SHOW_R) {pool_action(BOOTH_RIGHT,0);return true;}
+    if(action==SHOW_B) {pool_action(BOOTH_EXIT,0);return true;}
+    // A activates the focused original button (colour arrows, exit, swim).
+    return action!=SHOW_A;
+  }
   if(mode==HUD_DIVE){
     if(action==SHOW_R)pool_leave();
     if(action==SHOW_A&&!P.dive.m.airborne)dive_move(8);
@@ -473,18 +495,46 @@ bool pool_move(int dx,int dy){
   if(mode==HUD_WOBBLE){if(dx<0)wobble_move(5);if(dx>0)wobble_move(6);return true;}
   return false;
 }
+/** The original changing-booth window: booth art, costume preview, colour arrows and the
+ *  two original buttons. The room stays visible behind a 20% dim, like the web edition. */
+void pool_draw_booth(void){
+  float k=fminf(1.0f,fminf((SCREEN_W-8)/432.0f,(SCREEN_H-8)/354.0f));
+  float wx=(SCREEN_W-432*k)/2,wy=(SCREEN_H-354*k)/2;
+  float x=wx+8*k,y=wy+28*k;
+  fill_rect(0,0,SCREEN_W,SCREEN_H,rgba(0,0,0,51));
+  client_ui_window(wx,wy,432*k,354*k,"Changing booth");
+  const SceneArt *bg=gfx_art("pelle1");
+  if(bg)gfx_art_draw(bg,x,y,k,k,0xffffffff);
+  else client_ui_panel(x,y,416*k,322*k);
+  Ent *me=world_ent(W.me);
+  Look look=look_decode(me?me->look:0);
+  look.shirt_color=booth_pick;
+  avatar_draw(look_encode(&look)|AV_BATHING,4,POSE_STD,0,0,4,0,false,
+              x+158*k,y+112*k,1.5f*k,255);
+  const SceneArt *viewer=gfx_art("char.part.viewer");
+  if(viewer)gfx_art_draw(viewer,x+40*k,y+227*k,k,k,0xffffffff);
+  fill_rect(x+45*k,y+231*k,33*k,33*k,rgb_tint(SHIRT[booth_pick],255));
+  bool left_focus=client_ui_hot(x+18*k,y+234*k,25*k,29*k,BOOTH_LEFT,0);
+  bool right_focus=client_ui_hot(x+80*k,y+233*k,25*k,29*k,BOOTH_RIGHT,0);
+  bool exit_focus=client_ui_hot(x+288*k,y+185*k,118*k,41*k,BOOTH_EXIT,0);
+  bool swim_focus=client_ui_hot(x+287*k,y+234*k,119*k,27*k,BOOTH_SWIM,0);
+  const SceneArt *left=gfx_art(left_focus?"char.button.left.pressed":"char.button.left.active");
+  const SceneArt *right=gfx_art(right_focus?"char.button.right.pressed":"char.button.right.active");
+  const SceneArt *exit=gfx_art(exit_focus?"ph_biggerbutton_pressed":"ph_biggerbutton_active");
+  const SceneArt *swim=gfx_art(swim_focus?"ph_smallerbutton_pressed":"ph_smallerbutton_active");
+  if(left)gfx_art_draw(left,x+18*k,y+234*k,k,k,0xffffffff);
+  if(right)gfx_art_draw(right,x+80*k,y+233*k,k,k,0xffffffff);
+  if(exit)gfx_art_draw(exit,x+288*k,y+185*k,k,k,0xffffffff);
+  if(swim)gfx_art_draw(swim,x+287*k,y+234*k,k,k,0xffffffff);
+  text_draw("Choose Costume",x+62.5f*k,y+176*k,10,rgba(0,0,0,255),1);
+  text_draw("Colour",x+62.5f*k,y+188*k,10,rgba(0,0,0,255),1);
+  text_draw("Exit In Normal",x+338*k,y+195*k,10,rgba(0,0,0,255),1);
+  text_draw("Clothes",x+338*k,y+207*k,10,rgba(0,0,0,255),1);
+  text_draw("Go swimming!",x+338*k,y+243*k,10,rgba(0,0,0,255),1);
+}
 void pool_draw_panel(float x,float y,float w){
   int mode=pool_mode();
-  if(mode==HUD_BOOTH){
-    client_ui_label("Choose swimwear. Your clothes stay saved.",x+10,y+30,w-20,0x18272a);
-    for(int i=0;i<16;i++){
-      float bx=x+8+(i%8)*37,by=y+58+(i/8)*42;char label[16];snprintf(label,sizeof label,"%d",i+1);
-      client_ui_button(bx,by,34,36,label,OUTFIT,i);
-      fill_rect(bx+5,by+22,24,9,rgb_tint(SHIRT[i],255));
-    }
-    client_ui_button(x+8,y+170,146,28,"Clothes back on",OUTFIT,-1);
-    client_ui_button(x+160,y+170,142,28,"Leave booth",LEAVE,0);
-  }else if(mode==HUD_VOTE){
+  if(mode==HUD_VOTE){
     client_ui_paragraph("Rate the dive. The room's average becomes the score.",x+10,y+32,w-20,3,0x18272a);
     for(int i=1;i<=10;i++){char label[16];snprintf(label,sizeof label,"%d",i);client_ui_button(x+8+(i-1)%5*59,y+92+(i-1)/5*36,55,30,label,VOTE,i);}
   }else if(mode==HUD_DIVE){

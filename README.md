@@ -32,7 +32,12 @@ In the Navigator and the large furniture windows:
 
 - **D-pad**: move · **Cross**: choose or place · **Circle**: close or cancel
 - **L/R**: turn pages, or rotate and change height while placing
-- **Right stick up/down**: change catalogue section; in the Navigator, also turn pages
+- **Right stick up/down**: in the room, open Tools; change catalogue section; in the Navigator, also turn pages
+
+**Support** is in the bottom toolbar and in Tools. The $5 donation gives Tweebbo Club
+for life, the VIP badge and 10,000 credits the first time. In a changing booth,
+**D-pad** moves between the arrows and buttons, **L/R** changes the swimsuit colour,
+**Cross** confirms the focused control and **Circle** exits in normal clothes.
 
 ## Updates
 

@@ -26,6 +26,8 @@ void client_ui_panel(float x, float y, float w, float h);
 void client_ui_capsule(float x, float y, float w, float h, const char *text);
 /** Draws a pad-button glyph and its label; returns the x after the hint. */
 float client_ui_key_hint(const char *key, const char *text, float x, float y, u32 ink, u32 text_ink);
+/** The room's contextual prompt, drawn as a classic button.b capsule ending at `right`. */
+void client_ui_prompt(const char *key, const char *text, float right, float y);
 void client_ui_label(const char *text, float x, float y, float width, u32 ink);
 /** Registers a pad/touch hotspot without drawing it; returns whether it has the pad focus. */
 bool client_ui_hot(float x, float y, float w, float h, int cmd, int arg);

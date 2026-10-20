@@ -42,7 +42,7 @@ typedef struct { u8 page; u16 sx, sy, w, h; s16 x, y; u16 dw, dh; float depth; u
 typedef struct { const char *name; u8 page; u16 sx, sy, w, h; s16 rx, ry; } SceneArt;
 /** Layered public room (romfs:/gfx/scene_<model>_<page>.t3x). `water`: water height or -1. */
 typedef struct { const char *model; u8 pages; int count; const SceneSprite *sprites; s8 water; int art_count; const SceneArt *art; } Scene;
-typedef struct { u32 id; u16 def; u8 x, y, rot; u16 z; } RoomItem;
+typedef struct { u32 id; u16 def; u8 x, y, rot; u16 z; u8 state; } RoomItem;
 typedef struct {
   const char *key, *name, *classic, *rows;
   u8 door_x, door_y, dir, target_x, target_y;

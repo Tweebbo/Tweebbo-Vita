@@ -317,7 +317,7 @@ enum { INK=0x18272a, MUTED=0x4d5b61, EDGE=0x36586b, SLOT_SEL=0xffffff, GOLD=0xff
 /** One catalogue product slot (original catalog_bg_icon_slot) holding a furniture icon. */
 static void slot(float x, float y, u16 def, bool selected, int cmd, int arg) {
   bool focus=client_ui_hot(x,y,40,40,cmd,arg);
-  if(focus)fill_round(x-2,y-2,44,44,5,client_ui_rgb(GOLD));
+  if(focus)fill_round(x-2,y-2,44,44,5,client_ui_rgb(EDGE));
   if(selected){fill_round(x,y,40,40,3,client_ui_rgb(EDGE));fill_round(x+1,y+1,38,38,2,client_ui_rgb(SLOT_SEL));}
   if(!client_ui_icon_fit("catalog_bg_icon_slot",x+20,y+20,36))fill_rect(x+2,y+2,36,36,client_ui_rgb(0xdcdcd4));
   icon_fit(def,x+20,y+20,32,1.5f);
@@ -369,11 +369,11 @@ static void book(float x, float y, float w, float h) {
   for(int r=0;r<rows && S.index+r<cat_page_count;r++) {
     int i=S.index+r;float yy=ry+r*row_h;
     bool focus=client_ui_hot(px+1,yy,index_w-2,row_h,SELECT_CATEGORY,i);
-    if(i==S.category)fill_rect(px+1,yy,index_w-2,row_h,client_ui_rgb(0x6794a7));
+    if(i==S.category)fill_rect(px+1,yy,index_w-2,row_h,client_ui_rgb(0x4f7486));
     else if(focus)fill_rect(px+1,yy,index_w-2,row_h,client_ui_rgb(0xfff0b0));
-    if(focus)fill_rect(px+1,yy+row_h-2,index_w-2,2,client_ui_rgb(GOLD));
-    if(!*cat_pages[i].icon || !client_ui_icon_fit(cat_pages[i].icon,px+12,yy+row_h/2,18))fill_rect(px+9,yy+7,6,6,client_ui_rgb(0x6794a7));
-    char t[96];snprintf(t,sizeof t,"%s",cat_pages[i].name);text_fit(t,10,index_w-28);
+    if(focus)fill_rect(px+1,yy+row_h-2,index_w-2,2,client_ui_rgb(EDGE));
+    if(!*cat_pages[i].icon || !client_ui_icon_fit(cat_pages[i].icon,px+12,yy+row_h/2,18))fill_rect(px+9,yy+7,6,6,client_ui_rgb(0x4f7486));
+    char t[96];snprintf(t,sizeof t,"%s",!strcmp(cat_pages[i].id,"4")?"Exchange":cat_pages[i].name);text_fit(t,10,index_w-28);
     text_draw(t,px+24,yy+4,10,client_ui_rgb(i==S.category?0xffffff:INK),0);
   }
   client_ui_arrow(px,ib-18,index_w/2-2,18,"^",S.index?INDEX_PAGE:0,-rows);
@@ -395,15 +395,17 @@ static void book(float x, float y, float w, float h) {
   if(!book_offer_n) {
     // Front page (and pages without products): the page text and the Exchange shortcut.
     const char *body=pg && pg->body && *pg->body?pg->body:"Welcome to the Tweebbo catalogue. Choose a section on the right; furniture you buy waits in your inventory.";
+    if(pg && !strcmp(pg->id,"1"))body="Browse the ranges with L/R or the tabs on the right. Seasonal ranges change regularly, so check back for new items.";
+    else if(pg && !strcmp(pg->id,"4"))body="Credit coins are bought with credits. Chip tokens are bought with chips, lock for 24 hours after a trade, and redeem back into chips.";
     client_ui_paragraph(body,mx,gy,mw,wide?7:4,MUTED);
     if(pg && !strcmp(pg->id,"1"))for(int i=0;i<cat_page_count;i++)if(!strcmp(cat_pages[i].id,"4")) {
       float by=gy+(wide?128:72);
       bool focus=client_ui_hot(mx,by,mw,40,SELECT_CATEGORY,i);
-      if(focus)fill_round(mx-2,by-2,mw+4,44,5,client_ui_rgb(GOLD));
+      if(focus)fill_round(mx-2,by-2,mw+4,44,5,client_ui_rgb(EDGE));
       fill_round(mx,by,mw,40,4,client_ui_rgb(0x7c1116));fill_round(mx+1,by+1,mw-2,38,3,client_ui_rgb(0xfbf1e3));
       if(*cat_pages[i].icon)client_ui_icon_fit(cat_pages[i].icon,mx+16,by+20,18);
       text_draw("Tweebbo Exchange",mx+32,by+5,12,client_ui_rgb(0x7c1116),0);
-      text_draw("Credit coins and sacks you can trade and cash in.",mx+32,by+22,10,client_ui_rgb(MUTED),0);
+      text_draw("Credit coins and chip tokens you can trade.",mx+32,by+22,10,client_ui_rgb(MUTED),0);
       break;
     }
     if(!pg)client_ui_label("No products match the search.",mx,gy,mw,MUTED);
