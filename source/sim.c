@@ -84,7 +84,7 @@ static bool can_walk(int x, int y, bool goal) {
   if (!it) return true;
   const FurniDef *d = def_get(it->def);
   if (!d) return false;
-  if (it->state > 0 && (d->flags & DEF_GATE)) return true;
+  if (d->flags & DEF_GATE) return it->state == 1;
   if (d->flags & (DEF_LAY | DEF_TELEPORTER)) return goal;
   if (d->kind == KIND_FLOOR) return true;
   if (d->kind == KIND_SIT) return goal;
@@ -99,8 +99,11 @@ static bool occupied(int x, int y, u32 except) {
   return false;
 }
 
+// Players pass through each other, so only furniture (can_walk) blocks a route; occupied()
+// is still used to pick free tiles to stand on or spawn at.
 static bool walk_cb(void *ctx, int x, int y, bool goal) {
-  return can_walk(x, y, goal) && !occupied(x, y, *(u32 *)ctx);
+  (void)ctx;
+  return can_walk(x, y, goal);
 }
 
 static void send(const Writer *w) { sim_deliver(w->buf, w->len); }
@@ -141,7 +144,15 @@ static void walk_to(SEnt *e, int x, int y) {
   SItem *bed = item_at(x, y);
   const FurniDef *bd = bed ? def_get(bed->def) : NULL;
   if (bd && (bd->flags & DEF_LAY)) { if (bed->rot % 2 == 0) y = bed->y; else x = bed->x; }
-  if (!tile(x, y) || (e->x == x && e->y == y) || occupied(x, y, e->id)) return;
+  if (!tile(x, y)) return;
+  if (e->x == x && e->y == y) {
+    if (bd && (bd->flags & DEF_LAY)) {
+      e->plen = e->ppos = 0;
+      e->flags = (e->flags & ~(FLAG_SIT | FLAG_DANCE | FLAG_WAVE)) | FLAG_LAY;
+      e->dir = bed->rot * 2; e->dirty = true;
+    }
+    return;
+  }
   static u8 path[PATH_CAP][2];
   int n = path_find(S.w, S.h, e->x, e->y, x, y, walk_cb, &e->id, path, PATH_CAP);
   if (n < 0) return;
@@ -163,13 +174,16 @@ static void say(SEnt *e, const char *text) {
 }
 
 static void gesture(SEnt *e, int kind) {
-  if (e->flags & FLAG_LAY) return;
   switch (kind) {
     case GESTURE_WAVE: e->flags |= FLAG_WAVE; e->wave_ticks = 4; break;
-    case GESTURE_DANCE: e->flags ^= FLAG_DANCE; e->flags &= ~FLAG_SIT; break;
+    case GESTURE_DANCE:
+      if (e->ppos < e->plen) return;
+      e->flags ^= FLAG_DANCE; e->flags &= ~(FLAG_SIT|FLAG_LAY); break;
     case GESTURE_SIT:
       if (e->ppos < e->plen) return;
-      e->flags ^= FLAG_SIT; e->flags &= ~FLAG_DANCE; e->dir &= ~1;
+      if(e->flags & (FLAG_SIT|FLAG_LAY))e->flags &= ~(FLAG_SIT|FLAG_LAY);
+      else e->flags |= FLAG_SIT;
+      e->flags &= ~FLAG_DANCE; e->dir &= ~1;
       break;
     default: return;
   }
@@ -210,7 +224,7 @@ static void request_drink(SEnt *e, u32 id, u8 drink) {
     for (int x = it->x; x < it->x + w; x++)
       for (int k = 0; k < 4 && n < 32; k++) {
         int nx = x + N4[k][0], ny = y + N4[k][1];
-        if (!can_walk(nx, ny, false) || occupied(nx, ny, e->id)) continue;
+        if (!can_walk(nx, ny, false)) continue;
         int dist = (e->x > nx ? e->x - nx : nx - e->x) + (e->y > ny ? e->y - ny : ny - e->y);
         cand[n][0] = (u8)nx; cand[n][1] = (u8)ny; cand[n][2] = (u8)(dist > 255 ? 255 : dist); n++;
       }
@@ -279,7 +293,7 @@ static void enter(SEnt *e) {
       for (int dx = -r; dx <= r; dx++) {
         if ((dx < 0 ? -dx : dx) != r && (dy < 0 ? -dy : dy) != r) continue;
         int x = tx + dx, y = ty + dy;
-        if (!can_walk(x, y, false) || occupied(x, y, e->id) || near_door(x, y)) continue;
+        if (!can_walk(x, y, false) || near_door(x, y)) continue;
         walk_to(e, x, y);
         if (e->ppos < e->plen) return;
       }
@@ -394,7 +408,7 @@ static void tick(u64 now) {
     if (e->ppos < e->plen) {
       int nx = e->path[e->ppos][0], ny = e->path[e->ppos][1];
       bool last = e->ppos == e->plen - 1;
-      if (can_walk(nx, ny, last) && !occupied(nx, ny, e->id)) {
+      if (can_walk(nx, ny, last)) {
         e->ppos++;
         e->dir = dir_of(nx - e->x, ny - e->y);
         e->x = (u8)nx; e->y = (u8)ny;
@@ -425,6 +439,13 @@ static void tick(u64 now) {
     }
   }
   int dirty = 0;
+  for(int i=0;i<SIM_ENTS;i++) {
+    SEnt *e=&S.ents[i];if(!e->used)continue;
+    SItem *it=item_at(e->x,e->y);const FurniDef *d=it?def_get(it->def):NULL;
+    u16 z=it?it->z:0;
+    if(d&&(d->kind==KIND_FLOOR||(e->ppos>=e->plen&&!(e->flags&(FLAG_SIT|FLAG_LAY))&&(d->kind==KIND_SIT||(d->flags&DEF_LAY)))))z+=d->seat;
+    if(e->z!=z){e->z=z;e->dirty=true;}
+  }
   for (int i = 0; i < SIM_ENTS; i++) dirty += S.ents[i].used && S.ents[i].dirty;
   if (dirty) {
     Writer w; w_begin(&w, S_DELTAS); w_var(&w, (u64)dirty);
@@ -461,6 +482,7 @@ static const char *model_key(const char *room) {
   if (!strcmp(room, "pool")) return "pool_a";
   if (!strcmp(room, "diving")) return "pool_b";
   if (!strcmp(room, "rooftop")) return "md_a";
+  if (!strcmp(room, "igloo")) return "igloo_waddle";
   return room;
 }
 
@@ -486,7 +508,7 @@ void sim_start(const char *room_key, u64 now) {
   }
   for (int i = 0; i < S.model->item_count && i < SIM_ITEMS; i++) {
     const RoomItem *src = &S.model->items[i];
-    S.items[i] = (SItem){true, src->id, src->def, src->x, src->y, src->rot, src->state, src->z};
+    S.items[i] = (SItem){true, src->id, src->def, src->x, src->y, src->rot, 0, src->z};
   }
   S.next_eid = 1;
   S.next_guest = 1000;
@@ -574,6 +596,18 @@ void sim_receive(const u8 *data, int len) {
       SItem *it = item((u32)r_var(&r));
       const FurniDef *d = it ? def_get(it->def) : NULL;
       if (!d) break;
+      if (d->flags & DEF_LAY) {
+        int w, h; def_size(it->def, it->rot, &w, &h);
+        e->plen = e->ppos = 0;
+        for (int side = 0; side < (it->rot % 2 ? h : w); side++) {
+          int x = it->x + (it->rot % 2 ? 0 : side);
+          int y = it->y + (it->rot % 2 ? side : 0);
+          if (occupied(x, y, e->id)) continue;
+          walk_to(e, x, y);
+          if (e->plen || (e->x == x && e->y == y)) break;
+        }
+        break;
+      }
       if (d->drink) { request_drink(e, it->id, 0); break; }
       if (d->kind == KIND_TOGGLE) {
         it->state = it->state ? 0 : 1;

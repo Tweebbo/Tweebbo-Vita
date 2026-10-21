@@ -1,5 +1,6 @@
 // Shared room renderer for the Switch and Vita clients.
 #include "show.h"
+#include "igloo.h"
 #include "client_ui.h"
 #include "client_snow.h"
 #include "client_pool.h"
@@ -151,7 +152,17 @@ typedef struct { Pose pose; int frame; float lift, dx, dy, depth, anchor_y; } Po
 
 static PoseInfo pose_of(const Ent *e, u64 now, bool moving) {
   PoseInfo p = {POSE_STD, 0, ent_height(e, now), 0, 0, 0, ANCHOR_Y};
-  if ((e->flags & FLAG_LAY) && !moving) { p.pose = POSE_LAY; return p; }
+  if ((e->flags & FLAG_LAY) && (!moving || (e->flags & FLAG_ROLL))) {
+    Item *bed = world_item_at(e->x, e->y);
+    const FurniDef *d = bed ? def_get(bed->def) : NULL;
+    p.pose = POSE_LAY;
+    p.lift += (d ? d->seat : 32) - 32;
+    p.dx = e->dir == 0 ? -47 : 10;
+    p.dy = e->dir == 0 ? 32 : 30;
+    p.depth = 2;
+    p.anchor_y = 62;
+    return p;
+  }
   if ((e->flags & FLAG_SIT) && !moving) {
     Item *seat = world_item_at(e->x, e->y);
     const FurniDef *d = seat ? def_get(seat->def) : NULL;
@@ -300,6 +311,7 @@ static void draw_ent(const Ent *e, u64 now) {
   bool moving = ent_moving(e, now);
   PoseInfo p = pose_of(e, now, moving);
   float h = ent_height(e, now);
+  if (igloo_draw(e, body_dir(e, moving), p.pose, now, scr_x(roundf(sx)), scr_y(roundf(sy + HALF_H) - h), V.zoom)) return;
   if (p.pose != POSE_LAY)
     fill_circle(scr_x(roundf(sx)), scr_y(roundf(sy + HALF_H - h)), 12 * V.zoom, rgba(0x000000, 64));
   bool talking = now < e->talk_until && (now / 140) % 2 == 0;
@@ -652,6 +664,7 @@ void show_frame(u64 now) {
 // ------------------------------------------------------------------ input
 
 void show_walk(int dx, int dy) {
+  if(dx || dy)net_activity();
   if (client_ui_move(dx, dy)) return;
   Ent *me = world_ent(W.me);
   if (!me || !W.in_room || (dx == 0 && dy == 0)) return;
@@ -660,6 +673,7 @@ void show_walk(int dx, int dy) {
 }
 
 void show_tap(float x, float y) {
+  net_activity();
   if (client_ui_tap(x, y)) return;
   if (!W.in_room) {
     if (net_state() != NET_OFFLINE && V.pill_w > 0 && x >= V.pill_x - 6 && x <= V.pill_x + V.pill_w + 6 &&
@@ -690,7 +704,7 @@ void on_chat(u32 eid, const char *text) {
 void on_notice(const char *text) {client_shop_notice(text);client_pets_notice(text);client_trade_notice(text); show_toast(text, now_ms()); }
 void on_kicked(const char *text) { show_toast(text, now_ms()); net_goto("lobby", ""); }
 void on_transfer(const char *slug, const char *arrival) { net_goto(slug, arrival); }
-void on_alert(const char *json) { (void)json; }
+void on_alert(const char *json) { client_ui_alert(json); }
 void on_casino(const char *json) {client_casino_receive(json);}
 void on_snow(const u8 *data, int len) { client_snow_receive(data,len); }
 void on_social_changed(void) {client_social_push();}
@@ -717,6 +731,7 @@ void profile_save(const char *name, u64 look, u32 credits) {
 }
 
 void show_action(int action) {
+  net_activity();
   if (client_ui_action(action)) return;
   switch (action) {
     case SHOW_A: {

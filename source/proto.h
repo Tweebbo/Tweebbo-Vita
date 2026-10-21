@@ -4,7 +4,7 @@
 #include "common.h"
 
 #define PROTOCOL_VERSION 6
-enum { FEATURE_ECONOMY = 1, FEATURE_ACTIVITIES = 2, FEATURE_MUSIC = 4 };
+enum { FEATURE_ECONOMY = 1, FEATURE_ACTIVITIES = 2, FEATURE_MUSIC = 4, FEATURE_IGLOO = 8 };
 enum { NATIVE_STATUS = 2, NATIVE_GAMES = 4, NATIVE_CASINO = 8, NATIVE_SNOW = 16, NATIVE_SNOW2 = 32 /* 180 ms Snow Storm turns */, NATIVE_ROOMMOD = 64 };
 
 enum {
@@ -12,7 +12,8 @@ enum {
   C_ROTATE, C_USE, C_SET_LOOK, C_MOVE, C_REDEEM, C_PET, C_DRINK, C_GAME, C_SNOW, C_DECORATE, C_CASINO, C_ROOM_MOD, C_TRADE, C_ACTIVITY, C_MUSIC,
 };
 /* Room rights (JSON) and being asked to leave a room (server room/moderation.rs). */
-enum { S_ROOM_RIGHTS = 136, S_KICKED = 137 };
+enum { S_ROOM_RIGHTS = 136, S_KICKED = 137, S_AFK = 145 };
+enum { C_ACTIVE = 25 };
 /* Chips balance (a second, real-money currency): var amount. Older servers never send it. */
 enum { S_CHIPS = 138 };
 /* Native device of a player: var count, then {var entity id, u8 device}. Added for cross-play
@@ -52,3 +53,5 @@ u16 r_u16(Reader *r);
 u64 r_var(Reader *r);
 /** Copies the string, truncating it to `cap - 1` bytes without splitting a UTF-8 character. */
 void r_str(Reader *r, char *out, int cap);
+
+#define S_ROOM_TITLE 144

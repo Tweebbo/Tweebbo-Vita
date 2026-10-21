@@ -177,6 +177,7 @@ void world_handle(const u8 *data, int len) {
       W.guest_id = (u32)r_var(&r);
       break;
     case S_CHIPS: W.chips = (u32)r_var(&r); break;
+    case S_ROOM_TITLE: r_str(&r, W.title, sizeof W.title); break;
     case S_ROOM: {
       W.room_rights = W.room_owner = false;
       r_str(&r, W.slug, sizeof W.slug);

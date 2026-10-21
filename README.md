@@ -34,6 +34,12 @@ In the Navigator and the large furniture windows:
 - **L/R**: turn pages, or rotate and change height while placing
 - **Right stick up/down**: in the room, open Tools; change catalogue section; in the Navigator, also turn pages
 
+Unpublished local update: new direction presses and release/repress respond immediately,
+while held input still repeats at a bounded rate. In Chat, L shows older messages and
+R shows newer messages; incoming messages preserve the reading position. The matching
+local server supports the Igloo and its animated visitors. See
+[validation and limitations](../Tweebbo-Vercel/docs/performance/console-input/README.md).
+
 **Support** is in the bottom toolbar and in Tools. The $5 donation gives Tweebbo Club
 for life, the VIP badge and 10,000 credits the first time. In a changing booth,
 **D-pad** moves between the arrows and buttons, **L/R** changes the swimsuit colour,
@@ -50,3 +56,9 @@ saved to `ux0:data/Tweebbo/tweebbo.vpk`; open VitaShell and install it over the 
 
 - Free to play. No PlayStation Network account is needed.
 - Tweebbo is not affiliated with Sony.
+
+### Local room names and Classic missions (2026-10-20)
+
+Owners can rename rooms without changing their links or contents; the five-room creation limit is removed on the server. Room titles update live through optional server packet 144. My info in Friends edits the personal mission (up to 50 Unicode characters, including an empty mission). These changes are local only and require the updated local server.
+
+Enter your room and open Hotel → Room settings → Rename room. Friends → My info edits the mission; the selected contact displays their mission.

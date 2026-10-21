@@ -19,6 +19,7 @@
 #include "client_ui.h"
 #include "world.h"
 #include "update.h"
+#include "input_repeat.h"
 
 #define DATA_DIR "ux0:data/Tweebbo"
 
@@ -92,7 +93,7 @@ void store_save(const char *key, const char *value) {
 
 /** Left stick, D-pad and buttons. One walk step per press with a short repeat. */
 static void input(SceCtrlData *pad, unsigned prev, bool *running) {
-  static u64 next;
+  static InputRepeat repeat;
   u64 now = now_ms();
   unsigned down = pad->buttons & ~prev;
 
@@ -111,7 +112,6 @@ static void input(SceCtrlData *pad, unsigned prev, bool *running) {
   rstick = r;
   if ((down & SCE_CTRL_START) && show_confirm_quit("START", now_ms())) *running = false;
 
-  if (now < next) return;
   int dx = 0, dy = 0;
   if (pad->buttons & SCE_CTRL_UP) dy = -1;
   else if (pad->buttons & SCE_CTRL_DOWN) dy = 1;
@@ -121,9 +121,8 @@ static void input(SceCtrlData *pad, unsigned prev, bool *running) {
   else if (pad->lx < 128 - 48) dx = -1;
   else if (pad->ly > 128 + 48) dy = 1;
   else if (pad->ly < 128 - 48) dy = -1;
-  if (!dx && !dy) return;
+  if (!input_repeat(&repeat, dx, dy, now, pool_mode()==2 ? 80 : 180)) return;
   show_walk(dx, dy);
-  next = now + (pool_mode()==2 ? 80 : 180);
 }
 
 int main(void) {

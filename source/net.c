@@ -111,6 +111,7 @@ static struct {
   bool token_saved;
   // Another tab or device took over this character: do not reconnect until net_resume().
   bool replaced;
+  bool idle;
 } N;
 
 bool net_cancelled(void) {
@@ -147,7 +148,10 @@ static void token_key(char *key, int cap) {
 static void deliver(const u8 *data, int len, void *ctx) {
   (void)ctx;
   lock(&N.mu);
-  if (len > 0 && data[0] == S_REPLACED) N.replaced = true;
+  if (len > 0 && (data[0] == S_REPLACED || data[0] == S_AFK)) {
+    N.replaced = true;
+    N.idle = data[0] == S_AFK;
+  }
   if (len > 0 && data[0] == S_WELCOME) N.welcomed = true;
   if (len > 0 && data[0] == S_LOCKED) {
     N.blocked = NET_LOCKED;
@@ -208,7 +212,7 @@ static void net_thread(void *arg) {
     }
     if (is_replaced()) {
       // Reconnecting now would evict the other session, which would evict us again.
-      set_state(NET_REPLACED, "Tweebbo is open on another device or browser.");
+      set_state(NET_REPLACED, N.idle ? "Disconnected after 30 minutes without activity. Choose Play here to return." : "Tweebbo is open on another device or browser.");
       while (is_replaced() && !net_cancelled()) sleep_ms(50);
       failures = 0;
       continue;
@@ -236,7 +240,7 @@ static void net_thread(void *arg) {
       continue;
     }
     Writer w;
-    w_begin(&w, C_HELLO); w_u16(&w, PROTOCOL_VERSION); w_str(&w, token); w_str(&w, arrival); w_u8(&w, PLATFORM_3DS); w_str(&w, password); w_u8(&w, NATIVE_STATUS | NATIVE_ROOMMOD | NATIVE_GAMES | NATIVE_CASINO | NATIVE_SNOW | NATIVE_SNOW2); w_u8(&w, TWEEBBO_DEVICE); w_u8(&w, FEATURE_ECONOMY | FEATURE_ACTIVITIES | FEATURE_MUSIC);
+    w_begin(&w, C_HELLO); w_u16(&w, PROTOCOL_VERSION); w_str(&w, token); w_str(&w, arrival); w_u8(&w, PLATFORM_3DS); w_str(&w, password); w_u8(&w, NATIVE_STATUS | NATIVE_ROOMMOD | NATIVE_GAMES | NATIVE_CASINO | NATIVE_SNOW | NATIVE_SNOW2); w_u8(&w, TWEEBBO_DEVICE); w_u8(&w, FEATURE_ECONOMY | FEATURE_ACTIVITIES | FEATURE_MUSIC | FEATURE_IGLOO);
     bool alive = ws_send(&ws, w.buf, w.len);
     lock(&N.mu);
     // The arrival ticket is only valid once.
@@ -256,7 +260,7 @@ static void net_thread(void *arg) {
       }
       unlock(&N.mu);
       if (!alive) break;
-      alive = ws_poll(&ws, 25, deliver, NULL);
+      alive = ws_poll(&ws, 4, deliver, NULL);
       lock(&N.mu);
       if (N.welcomed && !welcomed) {
         welcomed = true;
@@ -586,6 +590,14 @@ void net_resume(void) {
   N.blocked = 0;
   N.want_gen++;
   unlock(&N.mu);
+}
+void net_activity(void) {
+  static u64 last;
+  u64 now=now_ms();
+  if(net_online() && (!last || now-last>=15000)){
+    const u8 active=C_ACTIVE;
+    net_send(&active,1);last=now;
+  }
 }
 
 void net_unlock(const char *password) {

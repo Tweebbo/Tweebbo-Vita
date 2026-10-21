@@ -8,8 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { FRIENDS, INCOMING, OUTGOING, BLOCKED, RESULTS, CONTACT, CONVERSATION, CONFIRM };
-enum { TAB=2000, SELECT, BACK, PAGE, SEARCH, REQUEST, ACCEPT, REJECT, CANCEL, REMOVE, BLOCK, UNBLOCK, CHAT, WRITE, VISIT, CONFIRM_ACTION, REFRESH, TEXT_PAGE };
+enum { FRIENDS, INCOMING, OUTGOING, BLOCKED, RESULTS, CONTACT, CONVERSATION, CONFIRM, MY_INFO };
+enum { TAB=2000, SELECT, BACK, PAGE, SEARCH, REQUEST, ACCEPT, REJECT, CANCEL, REMOVE, BLOCK, UNBLOCK, CHAT, WRITE, VISIT, CONFIRM_ACTION, REFRESH, TEXT_PAGE, EDIT_MISSION, MY_PROFILE };
 enum { LOAD=1, FIND, MESSAGES, ACTION, READ };
 static struct {
   int view, from, page, message_page, job, kind, confirm;
@@ -55,6 +55,9 @@ static bool search_done(const char *s) {
   if(!request(FIND,"GET",path,NULL))return false;
   snprintf(F.query,sizeof F.query,"%s",s);view(RESULTS);return true;
 }
+static bool mission_done(const char *s) {
+  return act("mission",s);
+}
 static bool message_done(const char *s) {
   if(!*s || !find(FRIENDS,F.peer))return false;
   snprintf(F.draft,sizeof F.draft,"%s",s);
@@ -63,6 +66,8 @@ static bool message_done(const char *s) {
 }
 static void message_cancelled(const char *s) {snprintf(F.draft,sizeof F.draft,"%s",s);F.draft_peer=F.peer;}
 void client_social_action(int command,int arg) {
+  if(command==MY_PROFILE){view(MY_INFO);F.peer=0;return;}
+  if(command==EDIT_MISSION){if(!F.job)client_ui_edit("Mission (up to 50 characters)",string(json_object_get(F.contacts,"self"),"mission"),mission_done);return;}
   if(command==TAB) {view(arg);F.peer=0;return;}
   if(command==PAGE) {if(F.view==CONVERSATION){F.message_page+=arg;F.text_offset=0;}else F.page+=arg;client_ui_changed();return;}
   if(command==TEXT_PAGE) {F.text_offset=arg?F.next_text:0;client_ui_changed();return;}
@@ -115,11 +120,20 @@ void client_social_update(bool visible) {
 void client_social_draw(float x,float y,float w) {
   char line[256];
   if(!net_online()) {client_ui_paragraph("Connect to the hotel to use Friends and private messages.",x+10,y+40,w-20,3,0x18272a);return;}
+  if(F.view==MY_INFO) {
+    json_t *me=json_object_get(F.contacts,"self");
+    client_ui_label(W.name,x+10,y+34,w-20,0x18272a);
+    client_ui_label("Mission",x+10,y+60,w-20,0x26373a);
+    client_ui_paragraph(string(me,"mission"),x+10,y+80,w-20,4,0x18272a);
+    client_ui_button(x+8,y+151,w-16,26,"Edit mission",!F.job?EDIT_MISSION:0,0);
+    client_ui_button(x+8,y+188,w-16,24,"Friends",TAB,FRIENDS);
+    return;
+  }
   if(F.view<=RESULTS) {
     static const char *tabs[]={"Friends","Received","Sent","Blocked"};
     for(int i=0;i<4;i++)client_ui_button(x+8+i*74,y+28,70,23,tabs[i],TAB,i);
     client_ui_field(x+8,y+55,142,23,F.query,"Find a player",!F.job?SEARCH:0,0);
-    client_ui_button(x+156,y+55,146,23,F.job?"Loading...":"Refresh",!F.job?REFRESH:0,0);
+    client_ui_button(x+156,y+55,146,23,"My info",MY_PROFILE,0);
     json_t *rows=list(F.view);int n=(int)json_array_size(rows),pages=(n+3)/4;if(pages<1)pages=1;
     if(F.page<0)F.page=0;
     if(F.page>=pages)F.page=pages-1;
@@ -167,7 +181,8 @@ void client_social_draw(float x,float y,float w) {
       client_ui_button(x+8,y+60,142,26,"Accept",enabled?ACCEPT:0,0);client_ui_button(x+156,y+60,146,26,"Decline",enabled?REJECT:0,0);
     } else if(find(OUTGOING,F.peer))client_ui_button(x+8,y+60,w-16,26,"Cancel request",enabled?CANCEL:0,0);
     else client_ui_button(x+8,y+60,w-16,26,"Add friend",enabled?REQUEST:0,0);
-    client_ui_button(x+8,y+134,w-16,26,"Block player",enabled?BLOCK:0,0);
+    client_ui_button(x+8,y+126,w-16,26,"Block player",enabled?BLOCK:0,0);
+    client_ui_paragraph(string(c,"mission"),x+10,y+157,w-20,2,0x26373a);
   }
   client_ui_label(F.status,x+10,y+193,w-20,0x26373a);
 }

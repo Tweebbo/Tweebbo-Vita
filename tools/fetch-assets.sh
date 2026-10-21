@@ -29,7 +29,7 @@ cp "$GFX"/furni/*.png romfs/furni/
 # Sprite coordinates and texture pages must come from the same export. The local
 # assets.h stays because the console RoomItem also carries the offline item state.
 mkdir -p source/gen
-cp build/pack-hd/gen/assets.c build/pack-hd/gen/character_skins.h "$SRC/source/gen/font.c" source/gen/
+cp build/pack-hd/gen/assets.c build/pack-hd/gen/character_skins.h build/pack-hd/gen/igloo.h "$SRC/source/gen/font.c" source/gen/
 echo "romfs ready: $(ls romfs/gfx | wc -l) gfx files, $(ls romfs/furni | wc -l) furniture textures"
 
 mkdir -p romfs/snow

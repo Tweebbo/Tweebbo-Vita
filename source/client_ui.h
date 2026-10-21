@@ -42,6 +42,7 @@ void client_ui_arrow(float x, float y, float w, float h, const char *glyph, int 
 void client_ui_changed(void);
 void client_ui_inspect(u32 item);
 void client_ui_close(void);
+void client_ui_alert(const char *json);
 void client_ui_casino(void);
 /* Return false to keep the draft open when a request could not be queued. */
 void client_ui_edit(const char *title, const char *initial, bool (*submit)(const char *));
