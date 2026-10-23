@@ -2,6 +2,7 @@
 #include "client_build.h"
 #include "client_ui.h"
 #include "client_casino.h"
+#include "client_camera.h"
 #include "catalog.h"
 #include "gfx.h"
 #include "net.h"
@@ -34,6 +35,7 @@ static struct {
 } S;
 
 static int index_rows;
+#define OPEN_CAMERA 1090
 static u32 room_pick;
 static const FinishChoice *finish(void) {return S.finish>=0 && S.finish<finish_choice_count?&finish_choices[S.finish]:NULL;}
 void client_shop_visible(bool visible) {S.visible=visible;}
@@ -140,6 +142,7 @@ static void rotate(int step) {
   S.ghost.ok=client_build_valid(&S.ghost);
 }
 void client_shop_action(int cmd, int arg) {
+  if(cmd==OPEN_CAMERA){client_ui_camera();return;}
   if(cmd==TURN_PAGE) {S.page+=arg;if(S.page<0)S.page=0;client_ui_changed();return;}
   if(cmd==INDEX_PAGE) {S.index+=arg;if(S.index<0)S.index=0;if(S.index>cat_page_count-1)S.index=cat_page_count-1;client_ui_changed();return;}
   if(cmd==CLEAR_QUERY) {S.query[0]=0;S.category=0;S.offer=-1;panel(OFFERS);return;}
@@ -439,7 +442,8 @@ static void hand(float x, float y, float w, float h) {
   if(inv) {
     char n[96];snprintf(n,sizeof n,"%d in your inventory",inventory_count(inv->def));
     bool ok=connected()&&world_can_decorate()&&!S.pending;
-    strip(ix,strip_y,iw,inv->def,d?d->name:"Item",n,world_can_decorate()?"Place it in this room.":"Enter a room you can decorate to place it.","Place",ok?PLACE:0);
+    bool camera=d && !strcmp(d->name,"Camera");
+    strip(ix,strip_y,iw,inv->def,d?d->name:"Item",n,camera?"Take a photo of this room.":world_can_decorate()?"Place it in this room.":"Enter a room you can decorate to place it.",camera?"Take photo":"Place",camera?OPEN_CAMERA:ok?PLACE:0);
   } else strip(ix,strip_y,iw,0,"Choose an item","","Select furniture to place it in the room.",NULL,0);
 }
 /** Furniture in this room as catalogue slots; the selected one opens its Move/Rotate/Pick up card. */

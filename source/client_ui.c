@@ -11,6 +11,8 @@
 #include "client_bar.h"
 #include "client_identity.h"
 #include "client_music.h"
+#include "client_camera.h"
+#include "feedback.h"
 #include "audio.h"
 #include "avatar.h"
 #include "gfx.h"
@@ -38,11 +40,14 @@ enum { OPEN = 1, CLOSE, REFRESH, SCOPE, ENTER_ROOM, PAGE, WRITE, RENAME, CATEGOR
 #endif
 enum { EDIT_CHAT, EDIT_NAME, EDIT_PASSWORD, EDIT_SEARCH, EDIT_TITLE, EDIT_FEATURE, EDIT_ROOM_PASSWORD, EDIT_ROOM_NAME };
 enum { DELETE_ROOM=99, ALERT_CLOSE=100 };
+#define CAMERA 31
+#define FEEDBACK 32
 typedef struct { float x, y, w, h; int cmd, arg; } Button;
-typedef struct { char slug[48], title[164], owner[40], label[48], icon[32]; int online; bool locked, featured, credits; } Room;
+typedef struct { char slug[48], title[164], owner[40], label[48], icon[32]; int online, priority; bool locked, featured, credits; } Room;
 static struct {
   int panel, focus, count, scope, page, room_n, job, category, shop_kind, edit, return_panel;
   bool shift, tv, keyboard_focus, symbols, secret;
+  bool pad;  /* last input came from the buttons/sticks: show the glyph layer */
   bool alert;
   char alert_title[80],alert_message[512];
   json_int_t alert_id;
@@ -55,7 +60,8 @@ static struct {
   int people_page, mod;
   int rights_page;
   Look look;
-  char error[128], input[256], draft[256], status[128];
+  char error[128], input[8001], draft[256], status[128];
+  size_t input_cap;
   char chat[160][96];
   int chat_n, chat_page, chat_pending;
   char server[128];
@@ -96,6 +102,17 @@ enum { CL_RIM=0x4f7486, CL_EDGE=0x36586b, CL_BODY=0xeeeeee, CL_MUTED=0x4d5b61,
 static u32 color_alpha(u32 c, u8 a) {
   return (u32)a << 24 | (c & 255) << 16 | (c & 0xff00) | (c >> 16 & 255);
 }
+/* "Smart" handheld skin, shared with the phone layout of the web client: dark glass bars,
+ * cream windows with a teal head. Glyph mode (docked, or the last input was the pad) adds
+ * the pad legend so everything can be found without touching the screen. */
+enum { SM_GLASS=0x112128, SM_TEAL=0x36586b, SM_TEAL_HI=0x52737c, SM_CREAM=0xf4f1e6,
+       SM_LINE=0xd8d2bf, SM_GOLD=0xffcb00, SM_GOLD_INK=0x3d2c00, SM_SOFT=0xb9cbd0, SM_CORAL=0xff8a7a };
+static bool glyphs(void) { return U.tv || U.pad; }
+static void glass(float x, float y, float w, float h, float r) {
+  fill_round(x, y, w, h, r, color_alpha(0x000000, 70));
+  fill_round(x+1, y+1, w-2, h-2, r-1, color_alpha(SM_GLASS, 222));
+  fill_rect(x+r, y+1, w-2*r, 1, color_alpha(0xffffff, 38));
+}
 static const UiSprite *ui_find(const char *name) {
   for (int i = 0; i < ui_sprite_count; i++) if (!strcmp(ui_sprites[i].name, name)) return &ui_sprites[i];
   return NULL;
@@ -134,24 +151,32 @@ static void nine_slice(const char *prefix, float x, float y, float w, float h, u
   snprintf(n, sizeof n, "%sbottom.middle", prefix); const UiSprite *bm = ui_find(n);
   snprintf(n, sizeof n, "%sbottom.right", prefix);  const UiSprite *br = ui_find(n);
   if (!tl || !tm || !tr || !ml || !mm || !mr || !bl || !bm || !br) return;
-  float l = tl->w, r = tr->w, t = tl->h, b = bl->h;
+  x = roundf(x); y = roundf(y); w = roundf(w); h = roundf(h);
+  float l = ml->w, r = mr->w, t = tl->h, b = bl->h;
   float iw = w - l - r, ih = h - t - b;
   if (iw < 0) iw = 0;
   if (ih < 0) ih = 0;
   if (iw > 0 && ih > 0)
     gfx_sprite_xy(mm->page, mm->x, mm->y, mm->w, mm->h, x+l, y+t, iw/mm->w, ih/mm->h, false, tint);
   if (iw > 0) {
-    gfx_sprite_xy(tm->page, tm->x, tm->y, tm->w, tm->h, x+l, y, iw/tm->w, t/tm->h, false, tint);
-    gfx_sprite_xy(bm->page, bm->x, bm->y, bm->w, bm->h, x+l, y+h-b, iw/bm->w, b/bm->h, false, tint);
+    float top_w = w - tl->w - tr->w;
+    if (!strcmp(prefix, "content.")) {
+      // The legacy top-middle sprite is solid black; only its first row is the border.
+      gfx_sprite_xy(mm->page, mm->x, mm->y, mm->w, mm->h, x+tl->w, y+1, top_w/mm->w, (t-1)/mm->h, false, tint);
+      gfx_sprite_xy(tm->page, tm->x, tm->y, tm->w, 1, x+tl->w, y, top_w/tm->w, 1, false, tint);
+    } else {
+      gfx_sprite_xy(tm->page, tm->x, tm->y, tm->w, tm->h, x+tl->w, y, top_w/tm->w, t/tm->h, false, tint);
+    }
+    gfx_sprite_xy(bm->page, bm->x, bm->y, bm->w, bm->h, x+bl->w, y+h-b, (w-bl->w-br->w)/bm->w, b/bm->h, false, tint);
   }
   if (ih > 0) {
     gfx_sprite_xy(ml->page, ml->x, ml->y, ml->w, ml->h, x, y+t, l/ml->w, ih/ml->h, false, tint);
     gfx_sprite_xy(mr->page, mr->x, mr->y, mr->w, mr->h, x+w-r, y+t, r/mr->w, ih/mr->h, false, tint);
   }
   gfx_sprite(tl->page, tl->x, tl->y, tl->w, tl->h, x, y, 1, false, tint);
-  gfx_sprite(tr->page, tr->x, tr->y, tr->w, tr->h, x+w-r, y, 1, false, tint);
+  gfx_sprite(tr->page, tr->x, tr->y, tr->w, tr->h, x+w-tr->w, y, 1, false, tint);
   gfx_sprite(bl->page, bl->x, bl->y, bl->w, bl->h, x, y+h-b, 1, false, tint);
-  gfx_sprite(br->page, br->x, br->y, br->w, br->h, x+w-r, y+h-b, 1, false, tint);
+  gfx_sprite(br->page, br->x, br->y, br->w, br->h, x+w-br->w, y+h-b, 1, false, tint);
 }
 /** Original capsule/field 9-slice ("<base>.left[.state]" and so on). */
 static const UiSprite *pill_part(const char *base, const char *part, const char *state) {
@@ -175,7 +200,7 @@ static bool pill(const char *base, const char *state, float x, float y, float w,
 static float pad_glyph_width(const char *key) {
   if (!strcmp(key, "Cross") || !strcmp(key, "Circle") || !strcmp(key, "Triangle") ||
       !strcmp(key, "Square") || !strcmp(key, "D-pad")) return 16;
-  return fmaxf(16, text_width(key, 11) + 10);
+  return fmaxf(16, text_width(key, 10) + 14);
 }
 #if TWEEBBO_DEVICE == 3
 /** PlayStation face symbol inside the light key. */
@@ -243,30 +268,26 @@ static float hint_chip(const char *key, const char *text, float x, float y, int 
   float gw = pad_glyph_width(key), w = gw + 6 + text_width(text, 11) + 14, h = 22;
   int i = U.count;
   hotspot(x, y, w, h, cmd, arg);
-  if (cmd && U.panel && U.focus == i) fill_round(x-2, y-2, w+4, h+4, 8, color(CL_EDGE));
-  if (!pill("button.b", "active", x, y, w, h, 0xffffffff)) {
-    fill_round(x, y, w, h, 6, color(CL_DARK));
-    fill_round(x+1, y+1, w-2, h-2, 5, color(CL_FACE));
-  }
+  if (cmd && U.panel && U.focus == i) fill_round(x-2, y-2, w+4, h+4, 13, color(SM_GOLD));
+  glass(x, y, w, h, 11);
   pad_glyph(key, x + 6, y + 4);
-  text_draw(text, x + 6 + gw + 5, y + 5, 11, color(CL_INK), 0);
+  text_draw(text, x + 6 + gw + 5, y + 5, 11, color(0xffffff), 0);
   return x + w + 4;
 }
 /** Always-on control legend in the room: a row of classic hint buttons, wrapped when needed. */
 static void room_hints(float margin) {
 #if TWEEBBO_DEVICE == 3
   static const char *keys[] = {"Cross", "Triangle", "Square", "Circle", "R-stick"};
-  static const char *labels[] = {"Talk/use", "Chat", "Wave", "Rooms", "Tools"};
+  static const char *labels[] = {"Talk/use", "Chat", "Wave", "Rooms", "More"};
 #else
   static const char *keys[] = {"A", "Y", "X", "B", "L/R", "ZL/ZR"};
-  static const char *labels[] = {"Talk/use", "Chat", "Wave", "Rooms", "Zoom", "Tools"};
+  static const char *labels[] = {"Talk/use", "Chat", "Wave", "Rooms", "Zoom", "More"};
 #endif
-  float hud = SCREEN_W >= 600 ? 252 : 168;
-  float start = margin + 8, x = start, y = margin + 8, max = SCREEN_W - margin - 16 - hud;
+  float start = margin + 8, x = start, y = margin + 38, max = SCREEN_W - margin - 8;
   for (int i = 0; i < COUNT(keys); i++) {
     float w = pad_glyph_width(keys[i]) + 6 + text_width(labels[i], 11) + 14;
     if (x > start && x + w > max) { x = start; y += 26; }
-    int cmd = !strcmp(labels[i], "Rooms") || !strcmp(labels[i], "Tools") ? OPEN : 0;
+    int cmd = !strcmp(labels[i], "Rooms") || !strcmp(labels[i], "More") ? OPEN : 0;
     int arg = !strcmp(labels[i], "Rooms") ? ROOMS : MORE;
     x = hint_chip(keys[i], labels[i], x, y, cmd, arg);
   }
@@ -303,16 +324,14 @@ static void button(float x, float y, float w, float h, const char *text, int cmd
   bool enabled = cmd != 0;
   bool focused = enabled && U.panel && U.focus == i;
   bool selected = (cmd==CATEGORY && arg==U.category) || (cmd==SCOPE && arg==U.scope) || (cmd==OPEN && arg==U.panel);
-  float r = fminf(h / 2.0f, 12.0f);
-  if (focused) fill_round(x-2, y-2, w+4, h+4, r+2, color(CL_EDGE));
-  u32 tint = enabled ? 0xffffffff : 0xffb4b4b4;
-  if (!pill(h >= 20 ? "button.a" : "button.b", "active", x, y, w, h, tint)) {
-    fill_round(x, y, w, h, r, color(CL_DARK));
-    fill_round(x+1, y+1, w-2, h-2, fmaxf(r-1, 1), color(!enabled ? CL_FACE_OFF : CL_FACE));
-  }
-  if (selected) fill_round(x+4, y+3, fmaxf(w-8, 2), fmaxf(h-6, 2), fmaxf(r-2, 2), color_alpha(CL_SEL, 120));
+  // Smart capsule: white face, soft teal-grey rim, teal when selected, gold rim on pad focus.
+  float r = fminf(h / 2.0f, 9.0f);
+  if (focused) fill_round(x-2, y-2, w+4, h+4, r+2, color(SM_GOLD));
+  fill_round(x, y, w, h, r, color(enabled ? 0x8fa6ad : 0xc9c4b6));
+  fill_round(x+1, y+1, w-2, h-2, fmaxf(r-1, 1), color(!enabled ? 0xe9e5d9 : selected ? SM_TEAL : 0xffffff));
+  if (enabled && !selected) fill_rect(x+r, y+h-2, w-2*r, 1, color(0xe2ddcf));
   char t[384]; copy(t, sizeof t, text); text_fit(t, 12, w-10);
-  text_draw(t, x+w/2, y+(h-14)/2, 12, color(enabled ? CL_INK : CL_DISABLED), 1);
+  text_draw(t, x+w/2, y+(h-14)/2, 12, color(!enabled ? 0x9a978d : selected ? 0xffffff : CL_INK), 1);
 }
 /** Original text field (field.*): white inset over the classic rim. */
 static void field(float x, float y, float w, float h, const char *text, const char *placeholder, int cmd, int arg) {
@@ -331,16 +350,29 @@ static void field(float x, float y, float w, float h, const char *text, const ch
 }
 /** Original 9-slice window with a centred title and the classic close box; registers CLOSE. */
 static void window_chrome(float x, float y, float w, float h, const char *title, bool closable) {
-  // Solid classic frame like the 3DS skin: black edge, steel-blue rim, light body.
-  fill_round(x, y, w, h, 6, color(CL_INK));
-  fill_round(x+1, y+1, w-2, h-2, 5, color(CL_RIM));
-  fill_round(x+6, y+21, w-12, h-27, 5, color(CL_EDGE));
-  fill_round(x+7, y+22, w-14, h-29, 4, color(CL_BODY));
-  char t[384]; copy(t, sizeof t, title); text_fit(t, 12, w-46);
+  // Smart sheet: soft shadow, teal head, cream body with a thin inner line.
+  fill_round(x+1, y+3, w, h, 10, color_alpha(0x000000, 60));
+  fill_round(x, y, w, h, 10, color(0x14262c));
+  fill_round(x+1, y+1, w-2, h-2, 9, color(SM_TEAL));
+  fill_rect(x+10, y+1, w-20, 1, color(SM_TEAL_HI));
+  fill_round(x+4, y+22, w-8, h-26, 7, color(SM_LINE));
+  fill_round(x+5, y+23, w-10, h-28, 6, color(SM_CREAM));
+  bool hint = closable && glyphs();
+  float room = hint ? 70 : 46;
+  char t[384]; copy(t, sizeof t, title); text_fit(t, 12, w-room);
   text_draw(t, x+w/2, y+4, 12, color(0xffffff), 1);
   if (!closable) return;
   hotspot(x+w-24, y+2, 20, 18, CLOSE, 0);
-  if (!ui_icon("button.close.up", x+w-20, y+5)) label("x", x+w-19, y+4, 16, 0xffffff);
+  fill_circle(x+w-14, y+11, 8, color(SM_TEAL_HI));
+  draw_line(x+w-17, y+8, x+w-11, y+14, color(0xffffff));
+  draw_line(x+w-17, y+14, x+w-11, y+8, color(0xffffff));
+  draw_line(x+w-16, y+8, x+w-10, y+14, color(0xffffff));
+  draw_line(x+w-16, y+14, x+w-10, y+8, color(0xffffff));
+#if TWEEBBO_DEVICE == 3
+  if (hint) pad_glyph("Circle", x+w-44, y+4);
+#else
+  if (hint) pad_glyph("B", x+w-44, y+4);
+#endif
 }
 /** Bottom toolbar: the original alapalkki_bg strip with the PC tools, all directly reachable. */
 typedef struct { const char *label, *icon; int cmd, arg; } Tool;
@@ -362,37 +394,53 @@ static bool tool_on(const Tool *t) {
   if (t->cmd == OPEN) return U.panel == t->arg;
   return false;
 }
-static void paw_icon(float cx, float cy, u32 c) {
-  fill_circle(cx, cy+2.5f, 4.4f, color(c));
-  fill_circle(cx-5, cy-3.5f, 2.2f, color(c));
-  fill_circle(cx, cy-5.5f, 2.2f, color(c));
-  fill_circle(cx+5, cy-3.5f, 2.2f, color(c));
+/** The handheld dock: six tools and More, like the phone layout. Pets, Games, Help and
+ *  Donate live in More (Donate also sits in the top bar). */
+static const Tool DOCK[] = {
+  {"Me",        NULL,               OPEN,        ME},
+  {"Rooms",     "building_icon@24", OPEN,        ROOMS},
+  {"Shop",      "brochure_icon@24", OPEN_SHOP,   SHOP_CATALOGUE},
+  {"Hand",      "hand_icon@26",     OPEN_SHOP,   SHOP_INVENTORY},
+  {"Friends",   "mes_dark_icon@24", OPEN,        SOCIAL},
+  {"Casino",    "casino-icon",      GOTO_CASINO, 0},
+  {"More",      NULL,               OPEN,        MORE},
+};
+static void more_dots(float cx, float cy, u32 c) {
+  for (int k = -1; k <= 1; k++) fill_circle(cx + k*6, cy, 2.2f, color(c));
 }
 static void classic_tools(float margin, float bar) {
+  (void)TOOLS;
   Ent *me = world_ent(W.me);
-  int n = COUNT(TOOLS);
-  float cell = (SCREEN_W - 2*margin - 12) / n;
+  int n = COUNT(DOCK);
+  bool wide = SCREEN_W >= 600;
+  float cell = wide ? 66 : 50, dw = cell*n + 8, dx = (SCREEN_W - dw) / 2;
+  glass(dx, bar+1, dw, 30, 12);
   for (int i = 0; i < n; i++) {
-    float x = margin+6 + i*cell, y = bar+3, w = cell-2, h = 26;
+    float x = dx+4 + i*cell, y = bar+3, w = cell, h = 26;
     int idx = U.count;
-    const Tool *t = &TOOLS[i];
+    const Tool *t = &DOCK[i];
     hotspot(x, y, w, h, t->cmd, t->arg);
     bool on = tool_on(t);
     bool focused = U.panel && U.focus == idx;
-    bool support = t->cmd == OPEN && t->arg == SUPPORT;
-    if (support) fill_round(x+1, y, w-2, h-1, 4, color_alpha(CL_GOLD, on ? 64 : 30));
-    else if (on) fill_round(x+1, y, w-2, h-1, 4, color_alpha(0xffffff, 40));
-    else if (focused) fill_round(x+1, y, w-2, h-1, 4, color_alpha(CL_GOLD, 70));
+    if (on) fill_round(x+3, y, w-6, h, 9, color(0x34474e));
+    else if (focused) fill_round(x+2, y, w-4, h, 9, color_alpha(SM_GOLD, 90));
     float cx = x + w/2;
-    // The small Vita canvas keeps the bar icon-only: ten 11 px labels do not fit.
-    bool show_label = SCREEN_W >= 600;
-    float icy = show_label ? y+8 : y+12, box = show_label ? 22 : 24;
+    float icy = wide ? y+7 : y+12, box = wide ? 20 : 22;
     if (t->cmd == OPEN && t->arg == ME && me)
-      avatar_draw_head(me->look, 3, cx - ANCHOR_X*0.5f, (show_label ? y+7 : y+11) - 36*0.5f, 0.5f);
-    else if (t->cmd == OPEN && t->arg == PETS) paw_icon(cx, icy, on ? CL_GOLD : 0xdddddd);
+      avatar_draw_head(me->look, 3, cx - ANCHOR_X*0.5f, (wide ? y+6 : y+11) - 36*0.5f, 0.5f);
+    else if (t->cmd == OPEN && t->arg == MORE) more_dots(cx, icy, on ? SM_GOLD : 0xffffff);
     else if (t->icon) ui_icon_fit(t->icon, cx, icy, box);
-    if (show_label) text_draw(t->label, cx, y+15, 11, color(support || on ? CL_GOLD : 0xdddddd), 1);
-    if (on || support) fill_rect(x+6, bar+30, w-12, 2, color(CL_GOLD));
+    if (wide) text_draw(t->label, cx, y+14, 10, color(on ? SM_GOLD : 0xdfe8ea), 1);
+    if (on) fill_round(cx-7, bar+28, 14, 2, 1, color(SM_GOLD));
+    // Glyph mode: the pad shortcut on the tools that have one.
+    if (glyphs() && !U.panel) {
+#if TWEEBBO_DEVICE == 3
+      const char *key = t->arg == ROOMS && t->cmd == OPEN ? "Circle" : t->arg == MORE && t->cmd == OPEN ? "R-stick" : NULL;
+#else
+      const char *key = t->arg == ROOMS && t->cmd == OPEN ? "B" : t->arg == MORE && t->cmd == OPEN ? "ZR" : NULL;
+#endif
+      if (key) pad_glyph(key, x + w - pad_glyph_width(key) - 2, bar - 6);
+    }
   }
 }
 /** The Casino's real-money chip (the web draws it in CSS). */
@@ -402,45 +450,41 @@ static void chip_icon(float cx, float cy, float r) {
   fill_circle(cx, cy, r-3, color(0xf6dede));
   fill_circle(cx, cy, r-4.5f, color(CL_RED));
 }
-/** Top-right HUD, like the web's floating room window: room, players online, credits and chips. */
+/** Smart top bar, like the phone layout: brand tile and room on the left; players online,
+ *  credits, chips (opens Buy chips) and the gold Donate pill on the right. */
 static void classic_hud(float margin) {
-  bool wide = SCREEN_W >= 600;
-  float w = wide ? 252 : 168;
-  float x = SCREEN_W - margin - 8 - w, y = 8, h = wide ? 50 : 28;
-  fill_round(x, y, w, h, 6, color(CL_INK));
-  fill_round(x+1, y+1, w-2, h-2, 5, color(CL_RIM));
-  fill_round(x+6, y+6, w-12, h-12, 4, color(CL_EDGE));
-  fill_round(x+7, y+7, w-14, h-14, 3, color(CL_BODY));
+  float x = margin+6, y = margin+5, w = SCREEN_W-2*margin-12, h = 26;
+  glass(x, y, w, h, 11);
+  ui_icon_at("tweebbo-mark@18", x+14, y+13);
   char buf[32];
-  if (wide) {
-    label(W.in_room ? W.title : "Tweebbo", x+11, y+9, w-98, CL_INK);
-    snprintf(buf, sizeof buf, "%d online", W.online);
-    float ox = x + w - 10 - text_width(buf, 11);
-    fill_round(ox-9, y+13, 6, 6, 3, color(CL_ONLINE));
-    text_draw(buf, ox, y+9, 11, color(CL_MUTED), 0);
-    ui_icon("credits_icon@14", x+12, y+29);
-    snprintf(buf, sizeof buf, "%u", (unsigned)W.credits);
-    text_draw(buf, x+28, y+28, 12, color(CL_INK), 0);
-    chip_icon(x+96, y+35, 8);
-    snprintf(buf, sizeof buf, "%u", (unsigned)W.chips);
-    text_draw(buf, x+108, y+28, 12, color(CL_INK), 0);
-    text_draw("+", x+108+text_width(buf, 12)+7, y+27, 13, color(CL_RED), 0);
-  } else {
-    snprintf(buf, sizeof buf, "%d", W.online);
-    fill_round(x+10, y+11, 6, 6, 3, color(CL_ONLINE));
-    text_draw(buf, x+20, y+7, 11, color(CL_MUTED), 0);
-    ui_icon("credits_icon@14", x+46, y+7);
-    snprintf(buf, sizeof buf, "%u", (unsigned)W.credits);
-    text_draw(buf, x+60, y+6, 11, color(CL_INK), 0);
-    chip_icon(x+112, y+13, 7);
-    snprintf(buf, sizeof buf, "%u", (unsigned)W.chips);
-    text_draw(buf, x+122, y+6, 11, color(CL_INK), 0);
-  }
-  // The chips pill opens the chip shop window (QR to the PC edition). Over a panel it stays
-  // available by touch and from Help, instead of a pad control of the panel.
-  U.chip_x = x+w-(wide?70:56); U.chip_y = y+(wide?26:3);
-  U.chip_w = wide?66:50; U.chip_h = 20;
+  float rx = x + w - 5;
+  float dw = text_width("Donate", 11) + 18;
+  fill_round(rx-dw, y+4, dw, 18, 9, color(SM_GOLD));
+  text_draw("Donate", rx-dw/2, y+6, 11, color(SM_GOLD_INK), 1);
+  if (!U.panel) hotspot(rx-dw, y+2, dw, 22, OPEN, SUPPORT);
+  rx -= dw + 6;
+  snprintf(buf, sizeof buf, "%u", (unsigned)W.chips);
+  float cw = 22 + text_width(buf, 11) + 20;
+  fill_round(rx-cw, y+4, cw, 18, 9, color(0x34474e));
+  chip_icon(rx-cw+11, y+13, 6.5f);
+  text_draw(buf, rx-cw+21, y+6, 11, color(0xffffff), 0);
+  text_draw("+", rx-10, y+4, 13, color(SM_CORAL), 0);
+  U.chip_x = rx-cw; U.chip_y = y+2; U.chip_w = cw; U.chip_h = 22;
   if (!U.panel) hotspot(U.chip_x, U.chip_y, U.chip_w, U.chip_h, OPEN, CHIPS);
+  rx -= cw + 6;
+  snprintf(buf, sizeof buf, "%u", (unsigned)W.credits);
+  float kw = 20 + text_width(buf, 11) + 8;
+  fill_round(rx-kw, y+4, kw, 18, 9, color(0x34474e));
+  ui_icon("credits_icon@14", rx-kw+5, y+6);
+  text_draw(buf, rx-kw+21, y+6, 11, color(0xffffff), 0);
+  rx -= kw + 8;
+  snprintf(buf, sizeof buf, "%d", W.online);
+  float ow = text_width(buf, 11);
+  text_draw(buf, rx-ow, y+6, 11, color(SM_SOFT), 0);
+  fill_circle(rx-ow-7, y+13, 3, color(CL_ONLINE));
+  rx -= ow + 16;
+  char t[164]; copy(t, sizeof t, W.in_room ? W.title : "Tweebbo"); text_fit(t, 12, rx-(x+30));
+  text_draw(t, x+30, y+5, 12, color(0xffffff), 0);
 }
 /** The update window: offer, download progress and install instructions. */
 static void update_draw(float x, float y, float w) {
@@ -620,12 +664,18 @@ static void filter_rooms(void) {
   for (int i=0;i<U.room_n;i++) if (contains(U.rooms[i].title,U.query) || contains(U.rooms[i].slug,U.query))
     U.visible[U.visible_n++]=i;
 }
+static int room_order(const void *a,const void *b) {
+  const Room *x=a,*y=b;
+  if(x->priority!=y->priority)return x->priority<y->priority?-1:1;
+  return x->online==y->online?strcmp(x->slug,y->slug):x->online>y->online?-1:1;
+}
 // Public rooms hosted by the offline simulation (source/sim.c), in navigator order.
 static const struct { const char *slug, *title; } OFFLINE_ROOMS[] = {
   {"lobby", "Classic Lobby"}, {"park", "Classic Park"}, {"pool", "The Pool"},
   {"diving", "Diving Deck"}, {"rooftop", "Rooftop Rumble"}, {"casino", "Casino"},
   {"afterhours", "After Hours Bar"},
   {"igloo", "Igloo"},
+  {"lobby-es", "Spanish Lobby"}, {"lobby-zh", "Chinese Lobby"}, {"lobby-ja", "Japanese Lobby"},
 };
 static void offline_rooms(void) {
   U.room_n=0; U.visible_n=0; U.page=0; U.error[0]=0; U.job=0; U.job_kind=0;
@@ -633,10 +683,12 @@ static void offline_rooms(void) {
     Room *room=&U.rooms[U.room_n++];
     copy(room->slug,sizeof room->slug,OFFLINE_ROOMS[i].slug);
     copy(room->title,sizeof room->title,OFFLINE_ROOMS[i].title);
-    room->online=0;room->credits=!strcmp(room->slug,"casino");room->featured=room->credits||!strcmp(room->slug,"afterhours");
+    room->online=0;room->locked=false;room->owner[0]=0;room->credits=!strcmp(room->slug,"casino");room->featured=room->credits||!strcmp(room->slug,"afterhours")||!strcmp(room->slug,"lobby");
+    room->priority=!strcmp(room->slug,"lobby")?10:room->credits?20:!strcmp(room->slug,"afterhours")?25:2147483647;
     copy(room->icon,sizeof room->icon,!strcmp(room->slug,"casino")?"credits_icon":!strcmp(room->slug,"afterhours")?"bar_cigar_icon":"building_icon");
     copy(room->label,sizeof room->label,"Practice with bots");
   }
+  qsort(U.rooms,U.room_n,sizeof U.rooms[0],room_order);
   filter_rooms();
 }
 static void refresh(void) {
@@ -674,6 +726,7 @@ static void open_panel(int panel) {
   }
 }
 static void edit_text(int edit) {
+  U.input_cap=256;
   U.edit = edit; U.return_panel = U.panel; U.panel = KEYBOARD; U.shift = false; U.symbols=false;
   copy(U.input, sizeof U.input, edit == EDIT_CHAT ? U.draft : edit == EDIT_NAME ? W.name : edit==EDIT_SEARCH ? U.query : edit==EDIT_TITLE ? U.title : edit==EDIT_ROOM_NAME ? W.title : "");
   changed();
@@ -693,6 +746,9 @@ void client_ui_alert(const char *text) {
   json_decref(j);
 }
 void client_ui_music(void){open_panel(MUSIC);}
+void client_ui_camera(void){open_panel(CAMERA);}
+void client_ui_feedback(void){feedback_open();open_panel(FEEDBACK);}
+void client_ui_person(u32 id){if(world_ent(id)){U.person=id;open_panel(PERSON);}}
 void client_ui_bar(void){open_panel(BAR);}
 void client_ui_casino(void) {open_panel(CASINO);}
 void client_ui_inspect(u32 item) {
@@ -706,6 +762,8 @@ void client_ui_edit_draft(const char *title,const char *initial,bool (*submit_te
   U.secret=false;
   edit_text(EDIT_FEATURE);copy(U.edit_title,sizeof U.edit_title,title);copy(U.input,sizeof U.input,initial);U.edit_submit=submit_text;U.edit_cancel=cancel;
 }
+static bool feedback_subject(const char *s){copy(feedback.subject,sizeof feedback.subject,s);feedback.status[0]=0;return true;}
+static bool feedback_message(const char *s){copy(feedback.message,sizeof feedback.message,s);feedback.status[0]=0;return true;}
 typedef struct { const char *name; int *style, *tint; int count, colors; const WardrobeEntry *items; const u32 *palette; } Category;
 static Category category(void) {
   Category cats[] = {
@@ -771,6 +829,15 @@ static void activate(int cmd, int arg) {
   if(cmd==ALERT_CLOSE){U.alert=false;changed();return;}
   if(net_state()==NET_REPLACED && cmd!=RESUME)return;
   if(cmd==RESUME)U.alert=false;
+  if(cmd>=13000) {
+    if(feedback.busy)return;
+    if(cmd==13000){feedback.category=arg;feedback.status[0]=0;}
+    else if(cmd==13001){client_ui_edit("Subject (3-100 characters)",feedback.subject,feedback_subject);U.input_cap=401;}
+    else if(cmd==13002){client_ui_edit("Description (10-2000 characters)",feedback.message,feedback_message);U.input_cap=8001;}
+    else if(cmd==13003)feedback_send();
+    changed();return;
+  }
+  if(cmd>=12000){client_camera_action(cmd,arg);return;}
   if(cmd>=11000){client_music_action(cmd,arg);return;}
   if(cmd>=10000){client_identity_action(cmd,arg);return;}
   if(cmd>=9000){client_bar_action(cmd,arg);return;}
@@ -794,7 +861,7 @@ static void activate(int cmd, int arg) {
     }
     case GESTURE: {
       Ent *me=world_ent(W.me);
-      if(ready() && me && arg>=GESTURE_WAVE && arg<=GESTURE_SIT){send_gesture(arg);open_panel(CLOSED);}break;
+      if(ready() && me && arg>=GESTURE_WAVE && arg<=GESTURE_DANCE_STYLE+3){send_gesture(arg);open_panel(CLOSED);}break;
     }
     case PUT_DRINK_AWAY:
       if(ready()){send_drink(0,0);open_panel(CLOSED);}break;
@@ -914,11 +981,11 @@ static void activate(int cmd, int arg) {
       const char *s=key_row(arg/10);
       for (int i=0;i<arg%10 && *s;i++) { s++; while (((unsigned char)*s & 0xc0)==0x80) s++; }
       int bytes=1; while (((unsigned char)s[bytes]&0xc0)==0x80) bytes++;
-      size_t n=strlen(U.input), cap=U.edit==EDIT_NAME ? NAME_CAP : U.edit==EDIT_PASSWORD ? 65 : sizeof U.input;
+      size_t n=strlen(U.input), cap=U.edit==EDIT_NAME ? NAME_CAP : U.edit==EDIT_PASSWORD ? 65 : U.input_cap;
       if (*s && n+bytes < cap) { memcpy(U.input+n,s,bytes); U.input[n+bytes]=0; }
       break;
     }
-    case SPACE: { size_t n=strlen(U.input), cap=U.edit==EDIT_NAME ? NAME_CAP : U.edit==EDIT_PASSWORD ? 65 : sizeof U.input;
+    case SPACE: { size_t n=strlen(U.input), cap=U.edit==EDIT_NAME ? NAME_CAP : U.edit==EDIT_PASSWORD ? 65 : U.input_cap;
       if (n+1<cap) { U.input[n]=' '; U.input[n+1]=0; } break; }
     case BACKSPACE: { size_t n=strlen(U.input); if (n) { n--; while(n && ((unsigned char)U.input[n]&0xc0)==0x80)n--; U.input[n]=0; } break; }
     case SHIFT: U.shift=!U.shift; break;
@@ -1026,6 +1093,7 @@ static void panel_rect(float *x,float *y,float *w,float *h) {
   else if(U.panel==SHOP && client_shop_wide()){*w=wide?476:SCREEN_W-16-2*margin;*h=bar-*y-6;}
 }
 float client_ui_room_left(void) {
+  if(U.panel==CAMERA || client_camera_capturing())return 0;
   if(!U.panel)return 0;
   float x,y,w,h;panel_rect(&x,&y,&w,&h);
   return x+w+8;
@@ -1087,6 +1155,8 @@ void client_ui_chat(u32 eid,const char *text) {
 }
 void client_ui_edit_secret(const char *title,bool (*submit)(const char *)){client_ui_edit(title,"",submit);U.secret=true;}
 void client_ui_update(void) {
+  feedback_poll();
+  client_camera_update();
   client_identity_update();client_music_update();
   if(U.panel==CHIPS || U.panel==SUPPORT)paylink_poll(now_ms());
   update_poll(now_ms());
@@ -1173,6 +1243,7 @@ void client_ui_update(void) {
       const char *title=json_string_value(json_object_get(v,"title"));
       if (!slug || !*slug || strlen(slug)>=sizeof U.rooms[0].slug || !title) continue;
       if (U.room_n==COUNT(U.rooms)) break;
+      const char *lang=json_string_value(json_object_get(json_object_get(v,"featured"),"lang"));
       Room *room=&U.rooms[U.room_n++];
       copy(room->slug,sizeof room->slug,slug); copy(room->title,sizeof room->title,title);
       room->online=(int)json_integer_value(json_object_get(v,"online"));
@@ -1180,11 +1251,13 @@ void client_ui_update(void) {
       const char *owner=json_string_value(json_object_get(v,"owner"));
       copy(room->owner,sizeof room->owner,owner?owner:"");
       json_t *feat=json_object_get(v,"featured");
-      room->featured=json_is_object(feat);
+      room->featured=json_is_true(json_object_get(v,"public")) && json_integer_value(json_object_get(v,"ownerId"))==0 && json_is_object(feat) && (!lang || !strcmp(lang,"en"));
+      room->priority=room->featured?(int)json_integer_value(json_object_get(feat,"order")):2147483647;
       const char *fl=json_string_value(json_object_get(feat,"label")),*fi=json_string_value(json_object_get(feat,"icon")),*fa=json_string_value(json_object_get(feat,"accent"));
-      copy(room->label,sizeof room->label,fl?fl:"");copy(room->icon,sizeof room->icon,fi?fi:"");
-      room->credits=fa && !strcmp(fa,"credits");
+      copy(room->label,sizeof room->label,room->featured && fl?fl:"");copy(room->icon,sizeof room->icon,room->featured && fi?fi:"");
+      room->credits=room->featured && fa && !strcmp(fa,"credits");
     }
+    qsort(U.rooms,U.room_n,sizeof U.rooms[0],room_order);
     filter_rooms();
     U.model_n=0;U.model=0;
     json_t *models=json_object_get(j,"models");
@@ -1199,8 +1272,10 @@ void client_ui_update(void) {
 
 static void keyboard(float x,float y,float w) {
   char shown[256];
-  if(U.secret || U.edit==EDIT_PASSWORD || U.edit==EDIT_ROOM_PASSWORD) { size_t n=strlen(U.input); memset(shown,'*',n); shown[n]=0; }
-  else copy(shown,sizeof shown,U.input);
+  size_t length=strlen(U.input),offset=length>240?length-240:0;
+  while(((unsigned char)U.input[offset]&0xc0)==0x80)offset++;
+  if(U.secret || U.edit==EDIT_PASSWORD || U.edit==EDIT_ROOM_PASSWORD) { size_t n=length<240?length:240; memset(shown,'*',n); shown[n]=0; }
+  else copy(shown,sizeof shown,U.input+offset);
   /* Keep the insertion end visible on a small screen. */
   char *tail=shown;
   while (*tail && text_width(tail,12)>w-24) { tail++; while(((unsigned char)*tail&0xc0)==0x80)tail++; }
@@ -1244,18 +1319,15 @@ void client_ui_draw(void) {
   if(U.panel==POOL&&(pool_mode()==2||pool_mode()==4)){pool_draw_hud();return;}
   if(U.panel==SNOW && client_snow_playing()){client_snow_hud();return;}
   float margin=U.tv?16:0, bar=SCREEN_H-32-margin;
-  // Classic toolbar strip (alapalkki_bg) stretched across the bottom.
-  const UiSprite *bar_bg = ui_find("alapalkki_bg");
-  if (bar_bg) gfx_sprite_xy(bar_bg->page, bar_bg->x, bar_bg->y, bar_bg->w, bar_bg->h,
-                            0, bar-2, (float)SCREEN_W/bar_bg->w, 1, false, 0xffffffff);
-  else fill_rect(0,bar,SCREEN_W,32+margin,color(CL_BAR));
-  fill_rect(0,bar-1,SCREEN_W,1,color(0x000000));
-  // Floating room window (room, players online, credits and chips). Hidden on the small
-  // canvas while a panel is open, where it would overlap.
-  if (W.in_room && (SCREEN_W >= 600 || !U.panel)) classic_hud(margin);
+  // Windows that put their pad legend on the bottom strip get a glass band; the room and
+  // the other windows keep the floating dock.
+  if (U.panel==KEYBOARD || U.panel==ROOMS || (U.panel==SHOP && (client_shop_wide() || client_shop_building())))
+    glass(margin+4, bar+1, SCREEN_W-2*margin-8, 30, 12);
+  // The smart top bar stays in rooms; a window simply covers its left part.
+  if (W.in_room) classic_hud(margin);
   else U.chip_w = 0;
-  // Small always-on control legend, so the pad map is visible while playing.
-  if (!U.panel && W.in_room) room_hints(margin);
+  // Glyph mode: the pad map under the top bar while playing.
+  if (!U.panel && W.in_room && glyphs()) room_hints(margin);
   if (!U.panel) {
     char context[128];int kind=-1;
     if(net_online()){
@@ -1280,6 +1352,8 @@ void client_ui_draw(void) {
   else if (U.panel==CASINO) { snprintf(title_buf,sizeof title_buf,"%s / %u credits",client_casino_title(),W.credits); title=title_buf; }
   else if (U.panel==SHOP && client_shop_wide()) title = client_shop_title();
   else if (U.panel==DELETE_CONFIRM) title = "Delete room";
+  else if (U.panel==CAMERA) title = "Camera";
+  else if (U.panel==FEEDBACK) title = "Suggestion box";
   else title = titles[U.panel];
   window_chrome(x,y,w,h,title,true);
   char line[384];
@@ -1327,16 +1401,37 @@ void client_ui_draw(void) {
   else if(U.panel==BAR)client_bar_draw(x,y,w);
   else if(U.panel==IDENTITY)client_identity_draw(x,y,w);
   else if(U.panel==MUSIC)client_music_draw(x,y,w);
+  else if(U.panel==CAMERA)client_camera_draw(x,y,w,h);
+  else if(U.panel==FEEDBACK) {
+    label("Send an idea or report a problem.",x+10,y+29,w-20,0x26373a);
+    static const char *categories[]={"Suggestion","Bug","Other"};
+    for(int i=0;i<3;i++)button(x+10+i*(w-20)/3,y+48,(w-26)/3,23,categories[i],feedback.busy?0:13000,i);
+    label(categories[feedback.category],x+10,y+75,w-20,0x26373a);
+    client_ui_field(x+10,y+93,w-20,23,feedback.subject,"Subject (3-100 characters)",feedback.busy?0:13001,0);
+    client_ui_field(x+10,y+122,w-20,23,feedback.message,"Description (10-2000 characters)",feedback.busy?0:13002,0);
+    client_ui_paragraph(feedback.status[0]?feedback.status:"Do not include passwords or private access codes.",x+10,y+151,w-20,2,0x26373a);
+    button(x+10,y+188,100,25,"Close",CLOSE,0);
+    button(x+116,y+188,w-126,25,feedback.busy?"Sending...":"Send message",feedback.busy?0:13003,0);
+  }
   else if(U.panel==CHIPS)chips_draw(x,y,w);
   else if(U.panel==SUPPORT)support_draw(x,y,w);
   else if(U.panel==UPDATE)update_draw(x,y,w);
   else if(U.panel==ACTIONS) {
     Ent *me=world_ent(W.me);bool enabled=me && ready();
-    label(W.name,x+10,y+30,w-20,0x18272a);
-    button(x+8,y+56,w-16,26,"Wave",enabled?GESTURE:0,GESTURE_WAVE);
-    button(x+8,y+88,w-16,26,me&&(me->flags&FLAG_DANCE)?"Stop dancing":"Dance",enabled?GESTURE:0,GESTURE_DANCE);
-    button(x+8,y+120,w-16,26,me&&(me->flags&(FLAG_SIT|FLAG_LAY))?"Stand up":"Sit on the floor",enabled?GESTURE:0,GESTURE_SIT);
-    button(x+8,y+152,w-16,26,"Put drink away",enabled&&me->drink?PUT_DRINK_AWAY:0,0);
+    bool lying=me && (me->flags&FLAG_LAY);
+    float third=(w-24)/3,half=(w-20)/2;
+    button(x+8,y+28,third,24,"Wave",enabled&&!lying?GESTURE:0,GESTURE_WAVE);
+    button(x+12+third,y+28,third,24,me&&(me->flags&FLAG_DANCE)?"Stop dance":"Dance",enabled&&!lying?GESTURE:0,GESTURE_DANCE);
+    button(x+16+2*third,y+28,third,24,me&&(me->flags&(FLAG_SIT|FLAG_LAY))?"Stand up":"Sit",enabled?GESTURE:0,GESTURE_SIT);
+    static const char *expr[]={"Kiss","Laugh","Thumb up","Sign","Sleep"};
+    static const int kinds[]={GESTURE_KISS,GESTURE_LAUGH,GESTURE_THUMB,GESTURE_SIGN,GESTURE_SLEEP};
+    label("Expressions",x+10,y+56,w-20,CL_MUTED);
+    for(int i=0;i<5;i++)button(x+8+(i%3)*(third+4),y+72+(i/3)*28,third,24,expr[i],enabled&&(!lying||kinds[i]==GESTURE_SLEEP)?GESTURE:0,kinds[i]);
+    button(x+16+2*third,y+100,third,24,lying||(me&&me->action==6)?"Wake up":"Stop",enabled?GESTURE:0,GESTURE_STOP);
+    label("Dance style",x+10,y+128,w-20,CL_MUTED);
+    static const char *styles[]={"Hab-Hop","Pogo Mogo","Duck Funk","The Rollie"};
+    for(int i=0;i<4;i++)button(x+8+(i%2)*(half+4),y+144+(i/2)*26,half,22,styles[i],enabled&&!lying?GESTURE:0,GESTURE_DANCE_STYLE+i);
+    button(x+8,y+197,w-16,20,"Put drink away",enabled&&me->drink?PUT_DRINK_AWAY:0,0);
   }
   else if(U.panel==ROOMS) {
     navigator(x,y,w,h);
@@ -1399,8 +1494,13 @@ void client_ui_draw(void) {
           snprintf(note,sizeof note,e->id==W.me?"You are connected through a %s system.":"This person is connected through a %s system.",system);
           show_device_badge(e->device,x+90,y+54,1.0f);
           client_ui_paragraph(note,x+108,y+50,w-118,2,0x26373a);
-        } else label("Web / other client",x+90,y+54,w-100,0x26373a);
-        bool other=e->id!=W.me && e->guest!=W.owner && ready();
+        } else label(e->guest>=4000000000u?"Hotel staff":"Web / other client",x+90,y+54,w-100,0x26373a);
+        bool receptionist=feedback_receptionist(e->guest,W.model);
+        if(receptionist) {
+          label("Receptionist",x+90,y+82,w-100,0x26373a);
+          client_ui_paragraph("Have an idea or found a problem? Leave a message in the suggestion box.",x+90,y+105,w-100,4,0x26373a);
+        }
+        bool other=e->guest<4000000000u && e->id!=W.me && e->guest!=W.owner && ready();
         if(other && W.room_rights) {
           button(x+90,y+88,100,25,"Kick",MODERATE,MOD_KICK);
           button(x+196,y+88,106,25,"Ban (1 hour)",MODERATE,MOD_BAN);
@@ -1410,7 +1510,7 @@ void client_ui_draw(void) {
           button(x+90,y+148,212,25,"Remove room rights",MODERATE,MOD_REMOVE_RIGHTS);
         }
         button(x+8,y+188,100,26,"Back",CLOSE,0);
-        button(x+116,y+188,186,26,"Trading",OPEN,TRADE);
+        button(x+116,y+188,186,26,receptionist?"Suggestions":"Trading",OPEN,receptionist?FEEDBACK:TRADE);
       }
     }
   } else if(U.panel==CHAT) {
@@ -1546,6 +1646,7 @@ void client_ui_draw(void) {
   if(U.focus>=U.count)U.focus=0;
 }
 bool client_ui_action(int action) {
+  if(action!=SHOW_OFFLINE)U.pad=true;
   if(net_state()==NET_REPLACED){if(action==SHOW_A)activate(RESUME,0);return true;}
   if(U.alert){if(action==SHOW_A || action==SHOW_B)activate(ALERT_CLOSE,0);return true;}
   if(U.panel==CHAT && (action==SHOW_L || action==SHOW_R)) {
@@ -1570,6 +1671,7 @@ bool client_ui_action(int action) {
   return action!=SHOW_OFFLINE;
 }
 bool client_ui_move(int dx,int dy) {
+  if(dx||dy)U.pad=true;
   if(net_state()==NET_REPLACED || U.alert)return true;
   if(U.panel==POOL&&pool_move(dx,dy))return true;
   if(U.panel==SNOW && client_snow_move(dx,dy))return true;
@@ -1587,11 +1689,13 @@ bool client_ui_move(int dx,int dy) {
   U.focus=target;return true;
 }
 bool client_ui_tap(float x,float y) {
+  U.pad=false;
   for(int i=0;i<U.count;i++) {
     Button b=U.buttons[i];
     if(x>=b.x && x<b.x+b.w && y>=b.y && y<b.y+b.h){U.focus=i;activate(b.cmd,b.arg);return true;}
   }
   if(U.chip_w>0 && x>=U.chip_x && x<U.chip_x+U.chip_w && y>=U.chip_y && y<U.chip_y+U.chip_h){open_panel(CHIPS);return true;}
+  if(W.in_room && y<(U.tv?16:0)+31)return true;  /* the top bar is not the floor */
   if(U.panel==SNOW && client_snow_tap(x,y))return true;
   if(U.panel==SHOP && client_shop_building() && x>=client_ui_room_left() && y<SCREEN_H-32-(U.tv?16:0))return false;
   return U.panel || y>=SCREEN_H-32-(U.tv?16:0);

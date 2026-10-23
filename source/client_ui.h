@@ -54,3 +54,6 @@ void client_ui_bar(void);
 void client_ui_edit_secret(const char *title,bool (*submit)(const char *));
 
 void client_ui_music(void);
+void client_ui_camera(void);
+void client_ui_feedback(void);
+void client_ui_person(u32 id);

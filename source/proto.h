@@ -19,6 +19,9 @@ enum { S_CHIPS = 138 };
 /* Native device of a player: var count, then {var entity id, u8 device}. Added for cross-play
    (3DS, Nintendo Switch, PlayStation Vita); older servers never send it. */
 enum { S_DEVICE = 140 };
+/** Expressions and dance styles (4.. in GESTURE); 147 (avatar effects) is not drawn here. */
+enum { S_ACTION = 146 };
+enum { GESTURE_KISS = 4, GESTURE_LAUGH, GESTURE_SLEEP, GESTURE_THUMB, GESTURE_SIGN, GESTURE_STOP, GESTURE_DANCE_STYLE };
 enum { S_TRADE = 139, S_ACTIVITY = 141, S_MUSIC = 142 };
 enum { DEVICE_BROWSER = 0, DEVICE_3DS = 1, DEVICE_SWITCH = 2, DEVICE_VITA = 3 };
 /* ROOM_MOD operations. */

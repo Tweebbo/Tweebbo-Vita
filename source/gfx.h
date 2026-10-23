@@ -18,6 +18,12 @@ void gfx_exit(void);
 /** Frame brackets: clear and present (the platform owns the renderer). */
 void gfx_begin(void);
 void gfx_present(void);
+/** Capture the next UI-free frame into 322x234 grayscale pixels; caller keeps the buffer alive. */
+void gfx_photo_request(u8 *gray);
+int gfx_photo_status(void);
+/** Upload between frames; draw the original brown/amber duotone. */
+bool gfx_photo_preview(const u8 *gray);
+void gfx_photo_draw(float x,float y,float w,float h);
 /** Call once per frame: frees cached textures over budget. */
 void gfx_frame(void);
 /** Region of an atlas page drawn at (x, y). `flip` mirrors horizontally in place. */

@@ -11,6 +11,7 @@
 #include "common.h"
 #include "finishes.h"
 #include "client_shop.h"
+#include "photo_pixels.h"
 
 #define ATLAS_MAX 16
 /* Big enough for the busiest room (lobby_hall + players), so a frame never evicts what
@@ -32,12 +33,28 @@ static float view_x,view_y,view_kx=1,view_ky=1;
 void gfx_sprite_transform(float x,float y,float kx,float ky){view_x=x;view_y=y;view_kx=kx;view_ky=ky;}
 static bool additive;
 static int frame_draws, frame_skipped, max_draws;
+static u8 *photo_pending;
+static int photo_status;
+static vita2d_texture *photo_texture;
+void gfx_photo_request(u8 *gray){photo_pending=gray;photo_status=0;}
+int gfx_photo_status(void){return photo_status;}
+bool gfx_photo_preview(const u8 *gray) {
+  if(!photo_texture)photo_texture=vita2d_create_empty_texture(322,234);
+  if(!photo_texture)return false;
+  u32 *pixels=vita2d_texture_get_datap(photo_texture);
+  int stride=vita2d_texture_get_stride(photo_texture)/4;
+  for(int y=0;y<234;y++)for(int x=0;x<322;x++)pixels[y*stride+x]=photo_duotone(gray[y*322+x]);
+  return true;
+}
 
 /* True when there is room for one more quad in this frame's vertex pool. */
 static bool pool_ok(void) {
   if (vita2d_pool_free_space() > POOL_RESERVE) { frame_draws++; return true; }
   frame_skipped++;
   return false;
+}
+void gfx_photo_draw(float x,float y,float w,float h) {
+  if(photo_texture && pool_ok())vita2d_draw_texture_scale(photo_texture,x*S,y*S,w*S/322,h*S/234);
 }
 
 #include "furni-cache.h"
@@ -199,6 +216,8 @@ bool gfx_init(void) {
 }
 
 void gfx_exit(void) {
+  vita2d_wait_rendering_done();
+  if(photo_texture){vita2d_free_texture(photo_texture);photo_texture=NULL;}
   audio_exit();
   vita2d_wait_rendering_done();
   gfx_snow_free();
@@ -243,6 +262,13 @@ void gfx_present(void) {
   frames++;
 #endif
   vita2d_end_drawing();
+  if(photo_pending) {
+    vita2d_wait_rendering_done();
+    const u32 *frame=vita2d_get_current_fb();
+    photo_status=frame?1:-1;
+    if(frame)photo_sample(photo_pending,frame,1024,(960-322*2)/2,(544-234*2)/2,2);
+    photo_pending=NULL;
+  }
   vita2d_swap_buffers();
   vita2d_wait_rendering_done();
   if (frame_skipped || frame_draws > max_draws + 1000) {
@@ -473,12 +499,17 @@ void fill_triangle(float x1, float y1, float x2, float y2, float x3, float y3, u
 }
 
 void fill_round(float x, float y, float w, float h, float r, u32 color) {
-  fill_rect(x + r, y, w - 2 * r, h, color);
-  fill_rect(x, y + r, w, h - 2 * r, color);
-  fill_circle(x + r, y + r, r, color);
-  fill_circle(x + w - r, y + r, r, color);
-  fill_circle(x + r, y + h - r, r, color);
-  fill_circle(x + w - r, y + h - r, r, color);
+  x=roundf(x); y=roundf(y); w=roundf(w); h=roundf(h);
+  if(w<=0 || h<=0)return;
+  r=fmaxf(0,fminf(r,fminf(w,h)/2));
+  int band=(int)ceilf(r);
+  for(int i=0;i<band && i<h/2;i++) {
+    float dy=fmaxf(0,r-(i+.5f));
+    float inset=roundf(r-sqrtf(fmaxf(0,r*r-dy*dy)));
+    fill_rect(x+inset,y+i,w-2*inset,1,color);
+    if(h-1-i!=i)fill_rect(x+inset,y+h-1-i,w-2*inset,1,color);
+  }
+  if(h>2*band)fill_rect(x,y+band,w,h-2*band,color);
 }
 
 void draw_line(float x1, float y1, float x2, float y2, u32 color) {
