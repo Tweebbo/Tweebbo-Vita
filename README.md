@@ -1,8 +1,10 @@
 # Tweebbo for PlayStation Vita
 
+Published follow-up, 2026-10-23: version 1.3.4 adds doorbell admission, profile badge selection and the Tweebbo Club catalogue shortcut, and fixes furniture animation and bear/terrier/pig rendering. The update is optional; existing clients remain admitted. Release builds and uploaded artifact hashes were verified. Physical-device checks remain pending. Older local-only notes below are historical.
+
 Notice follow-up, 2026-10-23: the thick black stripe above purchase notices is removed. The shared content-frame renderer now uses one row of the original top-border sprite and fills its remaining interior with the panel background.
 
-Local follow-up, 2026-10-23: Lia’s profile opens Suggestions, with validation and retained drafts. Social gestures preserve seated posture. Shared window corners and Vita rounded fills are corrected with GPU fences and vertex-pool checks retained. Vita3K captures cover Lia, the form and the white notice outline; isolated desktop tests also verify submission. Physical Vita validation remains pending. The common server recognizes Vita separately in moderator tools and keeps five virtual residents outside rooms. Review: `../Tweebbo-Vercel/docs/reviews/console-polish-20261023/`.
+Local follow-up, 2026-10-23: Lia’s profile opens Suggestions, with validation and retained drafts. Social gestures preserve seated posture. Shared window corners and Vita rounded fills are corrected with GPU fences and vertex-pool checks retained. Vita3K captures cover Lia, the form and the white notice outline; isolated desktop tests also verify submission. Physical Vita validation remains pending. The server recognizes Vita separately. Review: `../Tweebbo-Vercel/docs/reviews/console-polish-20261023/`.
 
 Local candidate, 2026-10-22: F3 and all four regional lobbies are packed. The navigator uses English PC featured priority. Keep a Camera in inventory, select it and choose Take photo for capture, zoom, caption and save. Saved photos can be placed on walls; opening their stored image still requires the web client. The VPK builds and the shared camera flow passes at Vita resolution; framebuffer capture still requires a physical Vita check. This is not yet a published release. Team evidence is in `../Tweebbo-Vercel/docs/reviews/console-polish-20261023/`.
 
