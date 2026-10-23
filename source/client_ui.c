@@ -13,6 +13,7 @@
 #include "client_music.h"
 #include "client_camera.h"
 #include "feedback.h"
+#include "doorbell.h"
 #include "audio.h"
 #include "avatar.h"
 #include "gfx.h"
@@ -42,6 +43,7 @@ enum { EDIT_CHAT, EDIT_NAME, EDIT_PASSWORD, EDIT_SEARCH, EDIT_TITLE, EDIT_FEATUR
 enum { DELETE_ROOM=99, ALERT_CLOSE=100 };
 #define CAMERA 31
 #define FEEDBACK 32
+#define DOORBELL 33
 typedef struct { float x, y, w, h; int cmd, arg; } Button;
 typedef struct { char slug[48], title[164], owner[40], label[48], icon[32]; int online, priority; bool locked, featured, credits; } Room;
 static struct {
@@ -747,6 +749,7 @@ void client_ui_alert(const char *text) {
 }
 void client_ui_music(void){open_panel(MUSIC);}
 void client_ui_camera(void){open_panel(CAMERA);}
+void client_ui_support(void){open_panel(SUPPORT);}
 void client_ui_feedback(void){feedback_open();open_panel(FEEDBACK);}
 void client_ui_person(u32 id){if(world_ent(id)){U.person=id;open_panel(PERSON);}}
 void client_ui_bar(void){open_panel(BAR);}
@@ -829,6 +832,7 @@ static void activate(int cmd, int arg) {
   if(cmd==ALERT_CLOSE){U.alert=false;changed();return;}
   if(net_state()==NET_REPLACED && cmd!=RESUME)return;
   if(cmd==RESUME)U.alert=false;
+  if(cmd>=14000){if(cmd==14000)doorbell_ring();else if(cmd==14001)doorbell_answer(arg!=0);else if(cmd==14002)doorbell_set(!doorbell.enabled);changed();return;}
   if(cmd>=13000) {
     if(feedback.busy)return;
     if(cmd==13000){feedback.category=arg;feedback.status[0]=0;}
@@ -1155,7 +1159,10 @@ void client_ui_chat(u32 eid,const char *text) {
 }
 void client_ui_edit_secret(const char *title,bool (*submit)(const char *)){client_ui_edit(title,"",submit);U.secret=true;}
 void client_ui_update(void) {
-  feedback_poll();
+  feedback_poll();doorbell_poll();
+  static u32 last_bell;
+  if(!doorbell.count)last_bell=0;
+  if(doorbell.guest&&doorbell.guest!=last_bell&&!U.panel){last_bell=doorbell.guest;open_panel(DOORBELL);}
   client_camera_update();
   client_identity_update();client_music_update();
   if(U.panel==CHIPS || U.panel==SUPPORT)paylink_poll(now_ms());
@@ -1340,7 +1347,10 @@ void client_ui_draw(void) {
     if (!W.in_room) {
       button(SCREEN_W/2-130,SCREEN_H/2+72,124,24,"Rooms",OPEN,ROOMS);
       button(SCREEN_W/2+6,SCREEN_H/2+72,124,24,"Help",OPEN,HELP);
-      if(net_state()==NET_LOCKED) button(SCREEN_W/2-90,SCREEN_H/2-2,180,24,"Enter password",WRITE,EDIT_PASSWORD);
+      if(net_state()==NET_LOCKED){
+        if(net_doorbell()){button(SCREEN_W/2-90,SCREEN_H/2-2,180,24,doorbell.waiting?"Waiting...":"Ring doorbell",doorbell.busy||doorbell.waiting?0:14000,0);client_ui_paragraph(doorbell.status,SCREEN_W/2-150,SCREEN_H/2+28,300,2,0x26373a);}
+        else button(SCREEN_W/2-90,SCREEN_H/2-2,180,24,"Enter password",WRITE,EDIT_PASSWORD);
+      }
     }
     return;
   }
@@ -1354,6 +1364,7 @@ void client_ui_draw(void) {
   else if (U.panel==DELETE_CONFIRM) title = "Delete room";
   else if (U.panel==CAMERA) title = "Camera";
   else if (U.panel==FEEDBACK) title = "Suggestion box";
+  else if (U.panel==DOORBELL) title = "Doorbell";
   else title = titles[U.panel];
   window_chrome(x,y,w,h,title,true);
   char line[384];
@@ -1373,10 +1384,20 @@ void client_ui_draw(void) {
     label(!owner?"Only the connected owner can change access.":U.job?"Loading room access...":!U.lock_known?"Access status unavailable.":U.locked?"Password required for visitors.":"Open to visitors.",x+10,y+57,w-20,0x26373a);
     button(x+8,y+81,w-16,26,"Rename room",owner&&!U.job?WRITE:0,EDIT_ROOM_NAME);
     button(x+8,y+113,w-16,26,"Set / change password",owner&&!U.job?WRITE:0,EDIT_ROOM_PASSWORD);
-    button(x+8,y+145,w-16,26,"Remove password",owner&&!U.job&&U.lock_known&&U.locked?REMOVE_LOCK:0,0);
+    button(x+8,y+145,140,26,"Open room",owner&&!U.job?REMOVE_LOCK:0,0);
+    button(x+156,y+145,146,26,"Doorbell",owner?OPEN:0,DOORBELL);
     button(x+8,y+177,140,26,"Rights and bans",owner?OPEN:0,RIGHTS);
     button(x+156,y+177,146,26,"Delete room",owner&&!U.job?OPEN:0,DELETE_CONFIRM);
 
+  }
+  else if(U.panel==DOORBELL) {
+    client_ui_paragraph(doorbell.status,x+10,y+34,w-20,2,0x26373a);
+    button(x+8,y+72,w-16,28,doorbell.enabled?"Turn off doorbell (open room)":"Use doorbell instead of password",!doorbell.busy&&W.room_owner?14002:0,0);
+    if(doorbell.guest){
+      label(doorbell.name,x+10,y+115,w-20,0x18272a);
+      button(x+8,y+151,140,28,"Let in",!doorbell.busy?14001:0,1);
+      button(x+156,y+151,146,28,"Decline",!doorbell.busy?14001:0,0);
+    }
   }
   else if(U.panel==DELETE_CONFIRM) {
     label(W.title,x+10,y+32,w-20,0x18272a);
@@ -1427,7 +1448,7 @@ void client_ui_draw(void) {
     static const int kinds[]={GESTURE_KISS,GESTURE_LAUGH,GESTURE_THUMB,GESTURE_SIGN,GESTURE_SLEEP};
     label("Expressions",x+10,y+56,w-20,CL_MUTED);
     for(int i=0;i<5;i++)button(x+8+(i%3)*(third+4),y+72+(i/3)*28,third,24,expr[i],enabled&&(!lying||kinds[i]==GESTURE_SLEEP)?GESTURE:0,kinds[i]);
-    button(x+16+2*third,y+100,third,24,lying||(me&&me->action==6)?"Wake up":"Stop",enabled?GESTURE:0,GESTURE_STOP);
+    if(!lying && me && me->action!=6)button(x+16+2*third,y+100,third,24,"Stop",enabled?GESTURE:0,GESTURE_STOP);
     label("Dance style",x+10,y+128,w-20,CL_MUTED);
     static const char *styles[]={"Hab-Hop","Pogo Mogo","Duck Funk","The Rollie"};
     for(int i=0;i<4;i++)button(x+8+(i%2)*(half+4),y+144+(i/2)*26,half,22,styles[i],enabled&&!lying?GESTURE:0,GESTURE_DANCE_STYLE+i);

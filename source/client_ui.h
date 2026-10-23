@@ -57,3 +57,5 @@ void client_ui_music(void);
 void client_ui_camera(void);
 void client_ui_feedback(void);
 void client_ui_person(u32 id);
+
+void client_ui_support(void);

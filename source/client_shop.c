@@ -18,7 +18,7 @@ enum { CATEGORIES, OFFERS, OFFER, INVENTORY, OWNED, ROOM_ITEMS, ROOM_ITEM, BUILD
 enum { SELECT_CATEGORY=1000, TURN_PAGE, BACK, SELECT_OFFER, BUY, SELECT_OWNED, PLACE,
        SELECT_ITEM, MOVE_ITEM, ROTATE_ITEM, PICKUP_ITEM, REDEEM_ITEM, CONFIRM_ITEM_ACTION, ROTATE_GHOST, PLACE_GHOST, CANCEL_GHOST,
        FINISH_KIND, FINISH_STEP, FINISH_PREVIEW, FINISH_BUY, FINISH_CONFIRM,
-       SEARCH_OFFERS, INTERACTIONS, USE_ITEM, CLOSE_DICE, DRINK_STEP, GET_DRINK, OPEN_CASINO, INDEX_PAGE, PICK_OWNED, CLEAR_QUERY, ROOM_LIST, PICK_PLACED, INVENTORY_LIST, GHOST_STEP };
+       SEARCH_OFFERS, INTERACTIONS, USE_ITEM, CLOSE_DICE, DRINK_STEP, GET_DRINK, OPEN_CASINO, INDEX_PAGE, PICK_OWNED, CLEAR_QUERY, ROOM_LIST, PICK_PLACED, INVENTORY_LIST, GHOST_STEP, JOIN_CLUB };
 static struct {
   int panel, page, category, offer, confirm, index;
   u32 item;
@@ -88,7 +88,7 @@ static const char *use_label(const FurniDef *d,const Item *it) {
   if(d->kind==KIND_SIT)return "Sit on furniture";
   if(d->kind==KIND_FLOOR)return "Walk here";
   if(d->kind==KIND_DICE)return it->state==7?"Rolling...":"Roll dice";
-  if(d->kind==KIND_TOGGLE || (d->kind==KIND_WALL && d->states>1))return d->states>2?"Change state":it->state?"Turn off / close":"Turn on / open";
+  if(W.room_owner && (d->kind==KIND_TOGGLE || (d->kind==KIND_WALL && d->states>1)))return d->states>2?"Change state":it->state?"Turn off / close":"Turn on / open";
   return NULL;
 }
 static int page_offers(int *out, int cap) {
@@ -142,6 +142,7 @@ static void rotate(int step) {
   S.ghost.ok=client_build_valid(&S.ghost);
 }
 void client_shop_action(int cmd, int arg) {
+  if(cmd==JOIN_CLUB){client_ui_support();return;}
   if(cmd==OPEN_CAMERA){client_ui_camera();return;}
   if(cmd==TURN_PAGE) {S.page+=arg;if(S.page<0)S.page=0;client_ui_changed();return;}
   if(cmd==INDEX_PAGE) {S.index+=arg;if(S.index<0)S.index=0;if(S.index>cat_page_count-1)S.index=cat_page_count-1;client_ui_changed();return;}
@@ -395,6 +396,10 @@ static void book(float x, float y, float w, float h) {
   fill_rect(mx,iy+head_h,mw,1,client_ui_rgb(0x888888));
   book_offer_n=page_offers(book_offers,COUNT(book_offers));
   float gy=iy+head_h+6,strip_y=ib-50;
+  if(pg&&!strcmp(pg->id,"60")){
+    client_ui_paragraph("Donate $5.00 USD or more for Tweebbo Club for life, Club and VIP badges and extra credits. Review the amount before paying.",mx,gy,mw,6,INK);
+    client_ui_button(mx,ib-42,mw,28,"Get Tweebbo Club",JOIN_CLUB,0);return;
+  }
   if(!book_offer_n) {
     // Front page (and pages without products): the page text and the Exchange shortcut.
     const char *body=pg && pg->body && *pg->body?pg->body:"Welcome to the Tweebbo catalogue. Choose a section on the right; furniture you buy waits in your inventory.";

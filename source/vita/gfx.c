@@ -27,7 +27,7 @@
 
 static vita2d_texture *atlas[ATLAS_MAX];
 static vita2d_texture *font_tex;
-static vita2d_texture *pet_tex[32];
+static vita2d_texture *pet_tex[64];
 static vita2d_texture *mask_tri_up, *mask_tri_down, *mask_disc;
 static float view_x,view_y,view_kx=1,view_ky=1;
 void gfx_sprite_transform(float x,float y,float kx,float ky){view_x=x;view_y=y;view_kx=kx;view_ky=ky;}
