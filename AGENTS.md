@@ -1,5 +1,7 @@
 # Tweebbo Vita: notes for contributors and AI agents
 
+Published on 2026-10-25 (local date): browser build 18 on `prod-20261025-games`, Nintendo 3DS 1.3.0, Switch 1.4.0 and Vita 1.4.0. The owner explicitly authorized the public release and player update notice. The web baseline was the live `prod-20261023-effects`, with existing effects, friends feedback, builders and payments preserved. Nintendo DS remains deferred. Physical-device acceptance is still separate from host/emulator verification. See `../Tweebbo-Vercel/docs/games-expansion/PUBLICATION.md` and `../Tweebbo-Hetzner/README.md` for publication evidence and rollback. Historical unpublished-candidate notes below describe earlier stages.
+
 Read `README.md` and `../Tweebbo-3DS/AGENTS.md`. This is the showcase proof of concept of the
 native PlayStation Vita client of Tweebbo; it plays in the same world as `tweebbo.lol`, the 3DS
 and the Switch.
