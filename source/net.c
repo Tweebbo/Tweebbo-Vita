@@ -1,4 +1,5 @@
 #include "net.h"
+#include "language.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -93,7 +94,10 @@ typedef struct {
 static struct {
   bool started, offline, quit, doorbell;
   Mutex mu;
-  ThreadHandle thread, http_thread;
+  ThreadHandle thread, http_thread, food_thread;
+  bool food_enabled;
+  u32 food_gen;
+  Queue food_in, food_out;
   char server[128], session_server[128];
   Endpoint ep;
   // Protected by mu:
@@ -103,6 +107,8 @@ static struct {
   bool room_full;
   u64 retry_at;
   u32 want_gen;
+  bool missing_room;
+  u32 missing_room_gen;
   NetState state;
   char status[128];
   Queue in, out;
@@ -120,6 +126,8 @@ bool net_cancelled(void) {
   unlock(&N.mu);
   return quit;
 }
+
+#include "fastfood_net.inc"
 
 static void set_state(NetState s, const char *text) {
   lock(&N.mu);
@@ -229,9 +237,15 @@ static void net_thread(void *arg) {
     unlock(&N.mu);
 
     set_state(failures ? NET_RETRYING : NET_CONNECTING, failures ? N.status : "Connecting…");
-    Ws ws;
+    Ws ws = {0};
     char err[128];
     if (!conn_global_init(err, sizeof err) || !ws_connect(&ws, &N.ep, path, 15000, err, sizeof err)) {
+      if (ws.http_status == 404) {
+        lock(&N.mu);
+        N.missing_room = true;
+        N.missing_room_gen = gen;
+        unlock(&N.mu);
+      }
       report_error(err);
       failures++;
       set_state(NET_RETRYING, err);
@@ -361,6 +375,7 @@ void net_start(u64 now) {
   if (!store_load("room", N.slug, sizeof N.slug) || !N.slug[0]) snprintf(N.slug, sizeof N.slug, DEFAULT_ROOM);
   N.arrival[0] = 0;
   N.password[0] = 0;
+  N.missing_room = false;
   N.want_gen++;
   N.state = NET_CONNECTING;
   snprintf(N.status, sizeof N.status, "Connecting…");
@@ -379,6 +394,9 @@ void net_stop(void) {
   unlock(&N.mu);
   join(N.thread);
   join(N.http_thread);
+  join(N.food_thread);
+  N.food_thread=0;N.food_enabled=false;
+  q_clear(&N.food_in);q_clear(&N.food_out);
   N.thread = N.http_thread = 0;
   q_clear(&N.in);
   q_clear(&N.out);
@@ -426,6 +444,16 @@ void net_send(const u8 *data, int len) {
 
 void net_update(u64 now) {
   if (N.offline) { sim_update(now); return; }
+  const char *reception = tw_reception_slug();
+  lock(&N.mu);
+  bool recover = N.missing_room && N.missing_room_gen == N.want_gen && strcmp(N.slug, reception);
+  N.missing_room = false;
+  unlock(&N.mu);
+  if (recover) {
+    // Navigate on the main thread; a late response must not replace a newer destination.
+    net_goto(reception, "");
+    on_notice("This room does not exist.");
+  }
   for (int budget = 0; budget < 256; budget++) {
     lock(&N.mu);
     Msg *m = q_pop(&N.in);

@@ -1,3 +1,4 @@
+#include "language.h"
 #include "client_trade.h"
 #include "client_ui.h"
 #include "client_social.h"
@@ -144,64 +145,64 @@ void client_trade_action(int command,int arg) {
 static const char *item_name(u16 def) {const FurniDef *d=def_get(def);return d?d->name:"Unknown furniture";}
 static void pages(float x,float y,float w,int count,int size) {
   int n=(count+size-1)/size;if(n<1)n=1;if(T.page>=n)T.page=n-1;
-  client_ui_button(x+8,y,w/2-12,23,"Previous",T.page?PAGE:0,-1);
-  client_ui_button(x+w/2+4,y,w/2-12,23,"Next",T.page+1<n?PAGE:0,1);
+  client_ui_button(x+8,y,w/2-12,23,TR("Previous"),T.page?PAGE:0,-1);
+  client_ui_button(x+w/2+4,y,w/2-12,23,TR("Next"),T.page+1<n?PAGE:0,1);
 }
 void client_trade_draw(float x,float y,float w) {
   bool enabled=connected() && !T.pending && !T.invalid;char text[192];
   if(T.invalid) {
     client_ui_paragraph(T.note,x+10,y+35,w-20,5,0x18272a);
-    client_ui_button(x+8,y+182,w-16,26,"Cancel trade",connected()?CANCEL:0,0);return;
+    client_ui_button(x+8,y+182,w-16,26,TR("Cancel trade"),connected()?CANCEL:0,0);return;
   }
   if(T.stage==EMPTY && !T.pending) {
     int n=0;u32 ids[MAX_ENTS];
     for(int i=0;i<MAX_ENTS;i++){Ent *e=&W.ents[i];if(e->used && e->id!=W.me && e->guest && e->guest!=W.guest_id && e->guest<4000000000u && !client_social_blocked(e->guest))ids[n++]=e->id;}
-    client_ui_label("Choose someone in this room.",x+10,y+30,w-20,0x26373a);
+    client_ui_label(TR("Choose someone in this room."),x+10,y+30,w-20,0x26373a);
     pages(x,y+188,w,n,4);
     for(int i=0;i<4 && T.page*4+i<n;i++){Ent *e=world_ent(ids[T.page*4+i]);client_ui_button(x+8,y+56+i*29,w-16,26,e->name,enabled?INVITE:0,(int)e->id);}
-    if(!n)client_ui_paragraph("No other players available. Invite a friend into this room.",x+10,y+70,w-20,4,0x26373a);
+    if(!n)client_ui_paragraph(TR("No other players available. Invite a friend into this room."),x+10,y+70,w-20,4,0x26373a);
     return;
   }
   if(T.stage==INVITATION || (T.stage==EMPTY && T.pending)) {
-    snprintf(text,sizeof text,T.outgoing?"Waiting for %s to accept your invitation.":"%s wants to trade furniture with you.",T.peer_name);
+    snprintf(text,sizeof text,T.outgoing?TR("Waiting for %s to accept your invitation."):TR("%s wants to trade furniture with you."),T.peer_name);
     client_ui_paragraph(text,x+10,y+38,w-20,4,0x18272a);
-    client_ui_button(x+8,y+170,140,26,T.outgoing?"Cancel":"Decline",connected()?CANCEL:0,0);
-    if(!T.outgoing)client_ui_button(x+156,y+170,146,26,"Accept invitation",enabled?ACCEPT:0,0);
+    client_ui_button(x+8,y+170,140,26,T.outgoing?TR("Cancel"):TR("Decline"),connected()?CANCEL:0,0);
+    if(!T.outgoing)client_ui_button(x+156,y+170,146,26,TR("Accept invitation"),enabled?ACCEPT:0,0);
   } else if(T.stage==ENDED) {
-    client_ui_paragraph(*T.note?T.note:"The trade ended.",x+10,y+38,w-20,6,0x18272a);
-    client_ui_button(x+8,y+182,w-16,26,"Back to players",DISMISS,0);return;
+    client_ui_paragraph(*T.note?T.note:TR("The trade ended."),x+10,y+38,w-20,6,0x18272a);
+    client_ui_button(x+8,y+182,w-16,26,TR("Back to players"),DISMISS,0);return;
   } else if(T.detail.id) {
     const FurniDef *d=def_get(T.detail.def);
     client_ui_paragraph(item_name(T.detail.def),x+102,y+34,w-112,4,0x18272a);
-    snprintf(text,sizeof text,"Item #%u",T.detail.id);client_ui_label(text,x+102,y+106,w-112,0x26373a);
+    snprintf(text,sizeof text,TR("Item #%u"),T.detail.id);client_ui_label(text,x+102,y+106,w-112,0x26373a);
     if(d && d->icon_w<=88 && d->icon_h<=88) {
       FurniPart part={.page=d->icon_page,.x=d->icon_x,.y=d->icon_y,.w=d->icon_w,.h=d->icon_h,.alpha=255};
       gfx_furni(d->id,&part,x+10+(88-d->icon_w)/2,y+36+(88-d->icon_h)/2,1,0xffffffff);
     }
-    client_ui_button(x+8,y+174,140,26,"Back to offers",BACK,0);
-    if(T.detail_side!=INSPECT_PEER)client_ui_button(x+156,y+174,146,26,T.detail_side==INSPECT_INV?"Add to offer":"Remove from offer",enabled?(T.detail_side==INSPECT_INV && T.mine_n<12 && in_inventory(T.detail.id) && !offered(T.detail.id)?ADD:T.detail_side==INSPECT_MINE && in_mine(T.detail.id)?REMOVE:0):0,(int)T.detail.id);
+    client_ui_button(x+8,y+174,140,26,TR("Back to offers"),BACK,0);
+    if(T.detail_side!=INSPECT_PEER)client_ui_button(x+156,y+174,146,26,T.detail_side==INSPECT_INV?TR("Add to offer"):TR("Remove from offer"),enabled?(T.detail_side==INSPECT_INV && T.mine_n<12 && in_inventory(T.detail.id) && !offered(T.detail.id)?ADD:T.detail_side==INSPECT_MINE && in_mine(T.detail.id)?REMOVE:0):0,(int)T.detail.id);
   } else if(T.view==1) {
     InvItem items[MAX_INV];int n=0;
     for(int i=0;i<W.inv_n;i++)if(!offered(W.inv[i].id))items[n++]=W.inv[i];
-    client_ui_label("Inventory: choose an item to inspect.",x+10,y+29,w-20,0x26373a);
+    client_ui_label(TR("Inventory: choose an item to inspect."),x+10,y+29,w-20,0x26373a);
     pages(x,y+155,w,n,4);
     for(int i=0;i<4 && T.page*4+i<n;i++){InvItem it=items[T.page*4+i];client_ui_button(x+8,y+49+i*26,w-16,24,item_name(it.def),INSPECT_INV,(int)it.id);}
-    if(!n)client_ui_label("No unoffered furniture in inventory.",x+10,y+64,w-20,0x26373a);
-    client_ui_button(x+8,y+184,w-16,26,"Back to offers",BACK,0);
+    if(!n)client_ui_label(TR("No unoffered furniture in inventory."),x+10,y+64,w-20,0x26373a);
+    client_ui_button(x+8,y+184,w-16,26,TR("Back to offers"),BACK,0);
   } else {
-    snprintf(text,sizeof text,"You: %d / 12",T.mine_n);client_ui_label(text,x+10,y+29,140,0x18272a);
+    snprintf(text,sizeof text,TR("You: %d / 12"),T.mine_n);client_ui_label(text,x+10,y+29,140,0x18272a);
     client_ui_label(T.peer_name,x+160,y+29,w-170,0x18272a);
     int n=T.mine_n>T.theirs_n?T.mine_n:T.theirs_n;pages(x,y+131,w,n,3);
     for(int i=0;i<3;i++)for(int side=0;side<2;side++) {
       int index=T.page*3+i,count=side?T.theirs_n:T.mine_n;OfferItem *list=side?T.theirs:T.mine;
-      client_ui_button(x+8+side*148,y+49+i*26,146,24,index<count?item_name(list[index].def):"(empty)",index<count?(side?INSPECT_PEER:INSPECT_MINE):0,index<count?(int)list[index].id:0);
+      client_ui_button(x+8+side*148,y+49+i*26,146,24,index<count?item_name(list[index].def):TR("(empty)"),index<count?(side?INSPECT_PEER:INSPECT_MINE):0,index<count?(int)list[index].id:0);
     }
-    snprintf(text,sizeof text,"You: %s  Them: %s",T.ok_mine?"accepted":"waiting",T.ok_peer?"accepted":"waiting");client_ui_label(text,x+10,y+158,w-20,0x26373a);
-    client_ui_button(x+8,y+177,92,26,"Inventory",INVENTORY,0);
-    client_ui_button(x+104,y+177,112,26,T.confirming?"Confirm trade":"Accept offer",enabled&&!T.ok_mine&&(T.mine_n||T.theirs_n)?READY:0,0);
-    client_ui_button(x+220,y+177,82,26,"Cancel",connected()?CANCEL:0,0);
-    if(connected() && !T.pending && !*T.note)client_ui_label(T.confirming?"Final review: changes reset both acceptances.":"Both players must accept, then confirm.",x+10,y+207,w-20,0x26373a);
+    snprintf(text,sizeof text,TR("You: %s  Them: %s"),T.ok_mine?"accepted":"waiting",T.ok_peer?"accepted":"waiting");client_ui_label(text,x+10,y+158,w-20,0x26373a);
+    client_ui_button(x+8,y+177,92,26,TR("Inventory"),INVENTORY,0);
+    client_ui_button(x+104,y+177,112,26,T.confirming?TR("Confirm trade"):TR("Accept offer"),enabled&&!T.ok_mine&&(T.mine_n||T.theirs_n)?READY:0,0);
+    client_ui_button(x+220,y+177,82,26,TR("Cancel"),connected()?CANCEL:0,0);
+    if(connected() && !T.pending && !*T.note)client_ui_label(T.confirming?TR("Final review: changes reset both acceptances."):TR("Both players must accept, then confirm."),x+10,y+207,w-20,0x26373a);
   }
-  if(!connected())client_ui_label("Disconnected. Reconnect to cancel safely.",x+10,y+211,w-20,0x26373a);
-  else if(*T.note || T.pending)client_ui_label(*T.note?T.note:"Waiting for the hotel...",x+10,y+211,w-20,0x26373a);
+  if(!connected())client_ui_label(TR("Disconnected. Reconnect to cancel safely."),x+10,y+211,w-20,0x26373a);
+  else if(*T.note || T.pending)client_ui_label(*T.note?T.note:TR("Waiting for the hotel..."),x+10,y+211,w-20,0x26373a);
 }

@@ -21,6 +21,13 @@
 #include "update.h"
 #include "input_repeat.h"
 
+#ifdef TWEEBBO_GAMES_TEST
+#if !TWEEBBO_LAN_ONLY
+#error Games exercise requires a LAN build
+#endif
+#include "../../tools/emu/games-exercise.h"
+#endif
+
 #define DATA_DIR "ux0:data/Tweebbo"
 
 /* Parameters baked into the eboot by vita-elf-create. Explicit values remove the
@@ -171,6 +178,9 @@ int main(void) {
     u64 now = now_ms();
     net_update(now);
     client_ui_update();
+#ifdef TWEEBBO_GAMES_TEST
+    games_exercise(now);
+#endif
     if (update_exit_requested()) running = false;
 #ifdef TWEEBBO_UI_TEST
     static u64 test_start;

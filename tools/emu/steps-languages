@@ -1,0 +1,28 @@
+# Normal LAN-only VPK. Logical 480x272 is shown at 2x from window position 160,128.
+wait 18
+click 940 640
+wait 2
+click 636 432
+wait 2
+shot language-help
+click 636 388
+wait 2
+shot language-picker
+click 336 316
+wait 2
+shot language-chinese
+click 636 316
+wait 2
+shot language-japanese
+click 336 392
+wait 2
+shot language-french
+click 636 392
+wait 2
+shot language-portuguese
+click 636 240
+wait 2
+shot language-spanish
+click 460 544
+wait 2
+shot language-help-spanish

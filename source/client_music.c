@@ -1,3 +1,4 @@
+#include "language.h"
 #include "client_music.h"
 #include "client_ui.h"
 #include "audio.h"
@@ -90,7 +91,7 @@ bool client_music_context(char *label, int cap, u64 now) {
   for (int i = 0; i < MAX_ITEMS; i++) {
     const Item *it = &W.items[i];
     if (!it->used || !music_machine(it->def) || abs(it->x - me->x) > 1 || abs(it->y - me->y) > 1) continue;
-    snprintf(label, cap, "Open the playlist");
+    snprintf(label, cap,"%s",TR("Open the playlist"));
     if (!M.machine) M.machine = it->id;
     return true;
   }
@@ -169,17 +170,17 @@ void client_music_draw(float x,float y,float w){
   const Track *t=M.playing&&M.index>=0&&M.index<M.track_n?&M.tracks[M.index]:NULL;
   const Item *machine=world_item(M.machine);
   bool control=net_online()&&machine&&world_can_arrange(machine);
-  client_ui_label(t?t->title:"Room playlist",x+10,y+30,w-20,0x18272a);
-  client_ui_label(t&&strcmp(t->provider,"trax")?"This provider plays on PC / phones.":M.job?"Loading Trax samples...":!net_online()?"Connect to use the room playlist.":"Original Trax samples play on this console.",x+10,y+48,w-20,0x18272a);
-  client_ui_button(x+8,y+72,144,24,audio_muted()?"Sound: muted":"Sound: on",MUTE,0);
-  client_ui_button(x+158,y+72,144,24,M.listening?"Mute room music":"Listen to music",LISTEN,0);
-  client_ui_button(x+8,y+102,94,24,M.playing?"Pause":"Play",control&&M.track_n?(M.playing?PAUSE:PLAY):0,M.index>=0&&M.index<M.track_n?M.index:0);
-  client_ui_button(x+108,y+102,90,24,"Next track",control&&M.track_n?NEXT:0,0);
-  client_ui_button(x+208,y+102,94,24,"Refresh",net_online()?SYNC:0,0);
+  client_ui_label(t?t->title:TR("Room playlist"),x+10,y+30,w-20,0x18272a);
+  client_ui_label(t&&strcmp(t->provider,"trax")?TR("This provider plays on PC / phones."):M.job?TR("Loading Trax samples..."):!net_online()?TR("Connect to use the room playlist."):TR("Original Trax samples play on this console."),x+10,y+48,w-20,0x18272a);
+  client_ui_button(x+8,y+72,144,24,audio_muted()?TR("Sound: muted"):TR("Sound: on"),MUTE,0);
+  client_ui_button(x+158,y+72,144,24,M.listening?TR("Mute room music"):TR("Listen to music"),LISTEN,0);
+  client_ui_button(x+8,y+102,94,24,M.playing?TR("Pause"):TR("Play"),control&&M.track_n?(M.playing?PAUSE:PLAY):0,M.index>=0&&M.index<M.track_n?M.index:0);
+  client_ui_button(x+108,y+102,90,24,TR("Next track"),control&&M.track_n?NEXT:0,0);
+  client_ui_button(x+208,y+102,94,24,TR("Refresh"),net_online()?SYNC:0,0);
   int count=M.track_n+M.song_n;if(M.page*2>=count)M.page=0;
   for(int row=0;row<2&&M.page*2+row<count;row++){
     int i=M.page*2+row;char label[110];snprintf(label,sizeof label,"%s%s",i<M.track_n?"Play: ":"Add: ",i<M.track_n?M.tracks[i].title:M.songs[i-M.track_n].title);
     client_ui_button(x+8,y+135+row*28,w-16,25,label,control?(i<M.track_n?PLAY:ADD):0,i<M.track_n?i:i-M.track_n);
   }
-  client_ui_button(x+8,y+193,140,23,"Previous",M.page?PAGE:0,-1);client_ui_button(x+156,y+193,146,23,"Next page",(M.page+1)*2<count?PAGE:0,1);
+  client_ui_button(x+8,y+193,140,23,TR("Previous"),M.page?PAGE:0,-1);client_ui_button(x+156,y+193,146,23,TR("Next page"),(M.page+1)*2<count?PAGE:0,1);
 }

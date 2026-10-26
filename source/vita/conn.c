@@ -80,6 +80,13 @@ static int entropy(void *ctx, unsigned char *out, size_t len) {
   return 0;
 }
 
+static int locked_random(void *ctx, unsigned char *out, size_t len) {
+  TLS_LOCK();
+  int result = mbedtls_ctr_drbg_random(ctx, out, len);
+  TLS_UNLOCK();
+  return result;
+}
+
 static bool tls_init(char *err, int err_cap) {
   if (T.ready) return true;
   mbedtls_ctr_drbg_init(&T.drbg);
@@ -93,7 +100,7 @@ static bool tls_init(char *err, int err_cap) {
   mbedtls_ssl_config_defaults(&T.conf, MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT);
   mbedtls_ssl_conf_authmode(&T.conf, MBEDTLS_SSL_VERIFY_REQUIRED);
   mbedtls_ssl_conf_ca_chain(&T.conf, &T.roots, NULL);
-  mbedtls_ssl_conf_rng(&T.conf, mbedtls_ctr_drbg_random, &T.drbg);
+  mbedtls_ssl_conf_rng(&T.conf, locked_random, &T.drbg);
   T.ready = true;
   return true;
 }
@@ -161,6 +168,10 @@ static int bio_recv(void *ctx, unsigned char *buf, size_t len) {
   return would_block() ? MBEDTLS_ERR_SSL_WANT_READ : MBEDTLS_ERR_NET_RECV_FAILED;
 }
 #endif
+
+Conn *conn_open_download(const Endpoint *ep, int timeout_ms, char *err, int err_cap) {
+  return conn_open(ep, timeout_ms, err, err_cap);
+}
 
 Conn *conn_open(const Endpoint *ep, int timeout_ms, char *err, int err_cap) {
   err[0] = 0;

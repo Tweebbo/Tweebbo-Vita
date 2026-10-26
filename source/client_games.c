@@ -1,3 +1,4 @@
+#include "language.h"
 #include "client_games.h"
 #include "client_ui.h"
 #include "client_social.h"
@@ -8,7 +9,8 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { KIND=3000, PAGE, CHALLENGE, ACCEPT, DECLINE, CELL, PROMOTION, RESIGN, CONFIRM, CANCEL, DISMISS };
+enum { KIND=3000, PAGE, CHALLENGE, ACCEPT, DECLINE, CELL, PROMOTION, RESIGN, CONFIRM, CANCEL, DISMISS, CENTER, FOOD, SNOW, BATTLE_LOBBY, SNOW_LOBBY, BATTLE };
+static bool center=true;
 static struct {int kind,page,picked,promotion;u32 revision,duel,invitation;bool pending,confirm,dismissed;} D;
 static const char *name(int kind) {return kind==1?"Tic-tac-toe":kind==2?"Connect Four":"Chess";}
 static const char *player(u32 id) {Ent *e=world_ent(id);return e?e->name:"Player";}
@@ -33,6 +35,12 @@ void client_games_update(bool visible) {
   if(visible)client_ui_changed();
 }
 void client_games_action(int command,int arg) {
+  if(command==CENTER){center=arg==0;client_ui_changed();return;}
+  if(command==FOOD){client_ui_fastfood();return;}
+  if(command==SNOW){client_ui_snow();return;}
+  if(command==BATTLE){client_ui_battle();return;}
+  if(command==BATTLE_LOBBY||command==SNOW_LOBBY){net_goto(command==BATTLE_LOBBY?"battleball":"snowstorm","");client_ui_close();return;}
+
   if(command==KIND){D.kind=arg;client_ui_changed();return;}
   if(command==PAGE){D.page+=arg;client_ui_changed();return;}
   if(command==CANCEL){D.confirm=false;client_ui_changed();return;}
@@ -57,17 +65,17 @@ void client_games_draw(float x,float y,float w) {
   char text[160];
   for(int i=0;i<8;i++)if(W.invites[i].from) {
     Ent *e=world_ent(W.invites[i].from);if(e && client_social_blocked(e->guest))continue;
-    snprintf(text,sizeof text,"%s invites you to play %s.",player(W.invites[i].from),name(W.invites[i].kind));
+    snprintf(text,sizeof text,TR("%s invites you to play %s."),player(W.invites[i].from),name(W.invites[i].kind));
     client_ui_paragraph(text,x+10,y+38,w-20,4,0x18272a);
-    client_ui_button(x+8,y+150,142,28,"Decline",!D.pending?DECLINE:0,(int)W.invites[i].from);
-    client_ui_button(x+156,y+150,146,28,"Accept",!D.pending?ACCEPT:0,(int)W.invites[i].from);return;
+    client_ui_button(x+8,y+150,142,28,TR("Decline"),!D.pending?DECLINE:0,(int)W.invites[i].from);
+    client_ui_button(x+156,y+150,146,28,TR("Accept"),!D.pending?ACCEPT:0,(int)W.invites[i].from);return;
   }
   Duel *g=&W.duel;
   if(g->id && !D.dismissed) {
     if(D.confirm && !g->result) {
-      client_ui_paragraph("Resign from this game? Your opponent will win.",x+10,y+40,w-20,4,0x18272a);
-      client_ui_button(x+8,y+150,142,28,"Keep playing",!D.pending?CANCEL:0,0);
-      client_ui_button(x+156,y+150,146,28,"Resign",!D.pending?CONFIRM:0,0);return;
+      client_ui_paragraph(TR("Resign from this game? Your opponent will win."),x+10,y+40,w-20,4,0x18272a);
+      client_ui_button(x+8,y+150,142,28,TR("Keep playing"),!D.pending?CANCEL:0,0);
+      client_ui_button(x+156,y+150,146,28,TR("Resign"),!D.pending?CONFIRM:0,0);return;
     }
     client_ui_label(name(g->kind),x+10,y+29,w-20,0x18272a);
     bool mine=my_turn();int cols=g->kind==1?3:g->kind==2?7:8,rows=g->kind==1?3:g->kind==2?6:8,size=g->kind==1?48:g->kind==2?23:20;
@@ -87,18 +95,27 @@ void client_games_draw(float x,float y,float w) {
     client_ui_label(player(g->players[1]),x+180,y+123,w-190,0x26373a);
     if(g->kind==3) {
       static const char *promotions[]={"","","Knight","Bishop","Rook","Queen"};
-      client_ui_label("Promotion",x+180,y+147,w-190,0x26373a);
+      client_ui_label(TR("Promotion"),x+180,y+147,w-190,0x26373a);
       client_ui_button(x+180,y+164,w-188,23,promotions[D.promotion],PROMOTION,0);
     }
-    client_ui_button(x+180,y+191,w-188,23,g->result?"Finished":"Resign",g->result?DISMISS:!D.pending?RESIGN:0,0);return;
+    client_ui_button(x+180,y+191,w-188,23,g->result?TR("Finished"):TR("Resign"),g->result?DISMISS:!D.pending?RESIGN:0,0);return;
   }
+  if(center){
+    client_ui_button(x+8,y+30,w-16,24,TR("Challenges"),CENTER,1);
+    client_ui_button(x+8,y+65,w-16,26,TR("Fast Food"),FOOD,0);
+    client_ui_button(x+8,y+96,w-16,26,TR("Snow Storm"),SNOW,0);
+    client_ui_button(x+8,y+127,w-16,26,TR("Battle Ball"),BATTLE,0);
+    client_ui_button(x+8,y+158,w/2-12,26,TR("Battle lobby"),BATTLE_LOBBY,0);
+    client_ui_button(x+w/2+4,y+158,w/2-12,26,TR("Snow lobby"),SNOW_LOBBY,0);return;
+  }
+  client_ui_button(x+w/2-60,y+188,120,24,TR("Game Center"),CENTER,0);
   for(int i=1;i<=3;i++)client_ui_button(x+8+(i-1)*99,y+30,95,24,name(i),KIND,i);
   fill_rect(x+10+(D.kind-1)*99,y+55,91,2,0xff766d52);
   int entries[MAX_ENTS],n=0;
   for(int i=0;i<MAX_ENTS;i++){Ent *e=&W.ents[i];if(e->used && e->id!=W.me && e->guest && e->guest<4001000000u && !client_social_blocked(e->guest))entries[n++]=i;}
   int pages=(n+3)/4;if(pages<1)pages=1;if(D.page<0)D.page=0;if(D.page>=pages)D.page=pages-1;
-  if(!n)client_ui_paragraph("Invite a friend to this room, then select their name to challenge them.",x+10,y+75,w-20,4,0x26373a);
+  if(!n)client_ui_paragraph(TR("Invite a friend to this room, then select their name to challenge them."),x+10,y+75,w-20,4,0x26373a);
   for(int row=0;row<4 && D.page*4+row<n;row++) {Ent *e=&W.ents[entries[D.page*4+row]];client_ui_button(x+8,y+65+row*28,w-16,26,e->name,CHALLENGE,(int)e->id);}
-  client_ui_button(x+8,y+188,80,24,"Previous",D.page?PAGE:0,-1);
-  client_ui_button(x+w-88,y+188,80,24,"Next",D.page+1<pages?PAGE:0,1);
+  client_ui_button(x+8,y+188,80,24,TR("Previous"),D.page?PAGE:0,-1);
+  client_ui_button(x+w-88,y+188,80,24,TR("Next"),D.page+1<pages?PAGE:0,1);
 }

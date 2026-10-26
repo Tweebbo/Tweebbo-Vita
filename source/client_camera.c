@@ -1,3 +1,4 @@
+#include "language.h"
 #include "client_camera.h"
 #include "client_ui.h"
 #include "catalog.h"
@@ -38,7 +39,7 @@ void client_camera_action(int cmd,int arg) {
     if(!W.in_room || !net_online() || !client_camera_owned()){message("Keep a Camera in your inventory and connect to the hotel.");return;}
     C.still=false;C.capture=1;C.capture_started=now_ms();C.zoom=1;message("Taking photo...");
   } else if(cmd==ZOOM && C.still){C.zoom+=arg;if(C.zoom<1)C.zoom=1;if(C.zoom>11)C.zoom=11;preview();}
-  else if(cmd==CAPTION)client_ui_edit("Photo caption (96 characters)",C.caption,caption);
+  else if(cmd==CAPTION)client_ui_edit(TR("Photo caption (96 characters)"),C.caption,caption);
   else if(cmd==SAVE && C.still && net_online()) {
     static const char alphabet[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     size_t n=sizeof C.pixels;char *b64=malloc(4*((n+2)/3)+1);if(!b64){message("Not enough memory. Try again.");return;}
@@ -71,15 +72,15 @@ void client_camera_update(void) {
 }
 void client_camera_draw(float x,float y,float w,float h) {
   if(C.still)gfx_photo_draw(x+10,y+29,161,117);
-  else {fill_rect(x+10,y+29,161,117,client_ui_rgb(0x222b2e));client_ui_paragraph("Captures the centre of your room without the interface or chat.",x+20,y+43,141,5,0xffffff);}
+  else {fill_rect(x+10,y+29,161,117,client_ui_rgb(0x222b2e));client_ui_paragraph(TR("Captures the centre of your room without the interface or chat."),x+20,y+43,141,5,0xffffff);}
   char zoom[32];snprintf(zoom,sizeof zoom,"Zoom %dx",C.zoom?C.zoom:1);
   client_ui_label(zoom,x+182,y+30,w-192,0x18272a);
   bool ready=C.still&&!C.job&&!C.capture;
   client_ui_button(x+182,y+50,50,24,"-",ready&&C.zoom>1?ZOOM:0,-1);
   client_ui_button(x+238,y+50,w-248,24,"+",ready&&C.zoom<11?ZOOM:0,1);
-  client_ui_button(x+182,y+82,w-192,26,"Caption",ready?CAPTION:0,0);
-  client_ui_paragraph(C.caption[0]?C.caption:"No caption",x+182,y+114,w-192,2,0x26373a);
-  client_ui_label(C.status[0]?C.status:client_camera_owned()?"Ready to take a photo.":"Buy a Camera and keep it in your inventory.",x+10,y+153,w-20,0x26373a);
-  client_ui_button(x+8,y+h-36,142,26,C.still?"Retake":"Take photo",!C.job&&!C.capture&&W.in_room&&net_online()&&client_camera_owned()?TAKE:0,0);
-  client_ui_button(x+158,y+h-36,w-166,26,C.job?"Saving...":"Save to inventory",ready&&net_online()?SAVE:0,0);
+  client_ui_button(x+182,y+82,w-192,26,TR("Caption"),ready?CAPTION:0,0);
+  client_ui_paragraph(C.caption[0]?C.caption:TR("No caption"),x+182,y+114,w-192,2,0x26373a);
+  client_ui_label(C.status[0]?C.status:client_camera_owned()?TR("Ready to take a photo."):TR("Buy a Camera and keep it in your inventory."),x+10,y+153,w-20,0x26373a);
+  client_ui_button(x+8,y+h-36,142,26,C.still?TR("Retake"):TR("Take photo"),!C.job&&!C.capture&&W.in_room&&net_online()&&client_camera_owned()?TAKE:0,0);
+  client_ui_button(x+158,y+h-36,w-166,26,C.job?TR("Saving..."):TR("Save to inventory"),ready&&net_online()?SAVE:0,0);
 }

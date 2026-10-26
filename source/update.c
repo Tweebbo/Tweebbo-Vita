@@ -60,7 +60,7 @@ static const char *manifest_url(void) {
 #define CHECK_MS (15 * 60 * 1000)
 #define CHECK_INITIAL_DELAY 4000
 #define DOWNLOAD_ATTEMPTS 8
-#define CHUNK (32 * 1024)
+#define CHUNK (128 * 1024)
 
 static struct {
   volatile UpdateState state;
@@ -286,11 +286,12 @@ void update_poll(u64 now) {
 typedef struct {
   FILE *file;
   mbedtls_sha256_context sha;
+  bool write_failed;
 } Sink;
 
 static bool file_sink(const u8 *data, int len, void *ctx) {
   Sink *s = ctx;
-  if (fwrite(data, 1, (size_t)len, s->file) != (size_t)len) return false;
+  if (fwrite(data, 1, (size_t)len, s->file) != (size_t)len) { s->write_failed = true; return false; }
   sha_update(&s->sha, data, (size_t)len);
   U.done += len;
   return true;
@@ -325,9 +326,9 @@ static bool download_file(const char *path, char *err, int cap) {
     fclose(old);
     if (offset) dbg_log("update: resuming at %ld", offset);
   }
-  free(buf);
   U.done = offset;
   s.file = fopen(path, "ab");
+  if (s.file) setvbuf(s.file, (char *)buf, _IOFBF, CHUNK);
   bool ok = false;
   if (!s.file) {
     snprintf(err, (size_t)cap, "Could not save the update on the SD card. Is it full or locked?");
@@ -338,7 +339,10 @@ static bool download_file(const char *path, char *err, int cap) {
     long total = 0;
     err[0] = 0;
     int status = http_download_from(U.url, offset, file_sink, &s, &total, err, cap);
-    fflush(s.file);
+    if (fflush(s.file) || s.write_failed) {
+      snprintf(err, (size_t)cap, "Could not save the update on the SD card. Is it full?");
+      break;
+    }
     offset = U.done;
     if (total > 0) U.size = total;
     dbg_log("update: attempt %d status %d, %ld bytes", attempt, status, offset);
@@ -347,6 +351,7 @@ static bool download_file(const char *path, char *err, int cap) {
     if (status == 0 && !err[0]) snprintf(err, (size_t)cap, "The download was interrupted.");
   }
   if (s.file) { fclose(s.file); s.file = NULL; }
+  free(buf);
   u8 digest[32];
   sha_finish(&s.sha, digest);
   mbedtls_sha256_free(&s.sha);

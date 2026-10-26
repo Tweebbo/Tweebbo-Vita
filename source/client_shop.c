@@ -1,3 +1,4 @@
+#include "language.h"
 #include "client_shop.h"
 #include "client_build.h"
 #include "client_ui.h"
@@ -156,7 +157,7 @@ void client_shop_action(int cmd, int arg) {
     if(S.ghost.on) {if(S.pending)return;S.ghost.on=false;panel(S.ghost.ignore?ROOM_ITEMS:INVENTORY);return;}
     panel(S.panel==INTERACT?ROOM_ITEM:S.panel==OFFER?OFFERS:S.panel==OWNED?INVENTORY:S.panel==ROOM_ITEM?ROOM_ITEMS:S.panel==CONFIRM_ITEM?ROOM_ITEM:S.panel==CONFIRM_FINISH?SPACES:S.panel==ROOM_ITEMS?INVENTORY:OFFERS);return;
   }
-  if(cmd==SEARCH_OFFERS){client_ui_edit("Search catalogue",S.query,search_offers);return;}
+  if(cmd==SEARCH_OFFERS){client_ui_edit(TR("Search catalogue"),S.query,search_offers);return;}
   if(cmd==SELECT_CATEGORY && arg>=0 && arg<cat_page_count) {S.category=arg;S.query[0]=0;S.offer=-1;panel(!strcmp(cat_pages[arg].layout,"ctlg_spaces")?SPACES:OFFERS);return;}
   if(cmd==SELECT_OFFER && arg>=0 && arg<cat_offer_count) {S.offer=arg;client_ui_changed();return;}
   if(cmd==SELECT_OWNED) {S.item=(u32)arg;panel(OWNED);return;}
@@ -328,6 +329,7 @@ static void slot(float x, float y, u16 def, bool selected, int cmd, int arg) {
 }
 /** Selected product strip along the bottom of the book: preview, name, price and the action. */
 static void strip(float x, float y, float w, u16 def, const char *name, const char *price, const char *desc, const char *action, int cmd) {
+  name=TR(name);desc=TR(desc);action=action?TR(action):NULL;
   fill_round(x,y,w,50,3,client_ui_rgb(0xaaaaaa));fill_round(x+1,y+1,w-2,48,2,client_ui_rgb(0xffffff));
   fill_rect(x+4,y+4,44,42,client_ui_rgb(0xf2f2f2));
   if(def)icon_fit(def,x+26,y+25,40,2);
@@ -366,7 +368,7 @@ static void book(float x, float y, float w, float h) {
   float ix=x+10,iy=y+27,iw=w-20,ib=y+h-8;
   float index_w=wide?132:118,mx=ix,mw=iw-index_w-8,px=ix+mw+8;
   // Index: search field, then the pages with their original icons.
-  client_ui_field(px,iy,index_w,22,S.query,"Search",SEARCH_OFFERS,0);
+  client_ui_field(px,iy,index_w,22,S.query,TR("Search"),SEARCH_OFFERS,0);
   float ry=iy+26,row_h=20;int rows=(int)((ib-22-ry)/row_h);if(rows<1)rows=1;index_rows=rows;
   if(S.index>cat_page_count-rows)S.index=cat_page_count-rows;if(S.index<0)S.index=0;
   fill_round(px,ry-1,index_w,rows*row_h+2,3,client_ui_rgb(0xaaaaaa));fill_rect(px+1,ry,index_w-2,rows*row_h,client_ui_rgb(0xffffff));
@@ -377,7 +379,7 @@ static void book(float x, float y, float w, float h) {
     else if(focus)fill_rect(px+1,yy,index_w-2,row_h,client_ui_rgb(0xfff0b0));
     if(focus)fill_rect(px+1,yy+row_h-2,index_w-2,2,client_ui_rgb(EDGE));
     if(!*cat_pages[i].icon || !client_ui_icon_fit(cat_pages[i].icon,px+12,yy+row_h/2,18))fill_rect(px+9,yy+7,6,6,client_ui_rgb(0x4f7486));
-    char t[96];snprintf(t,sizeof t,"%s",!strcmp(cat_pages[i].id,"4")?"Exchange":cat_pages[i].name);text_fit(t,10,index_w-28);
+    char t[96];snprintf(t,sizeof t,"%s",TR(!strcmp(cat_pages[i].id,"4")?"Exchange":cat_pages[i].name));text_fit(t,10,index_w-28);
     text_draw(t,px+24,yy+4,10,client_ui_rgb(i==S.category?0xffffff:INK),0);
   }
   client_ui_arrow(px,ib-18,index_w/2-2,18,"^",S.index?INDEX_PAGE:0,-rows);
@@ -387,36 +389,36 @@ static void book(float x, float y, float w, float h) {
   // The page's original headline (HD packs) drawn at half scale: one source pixel per screen
   // pixel on the 2x Switch and Vita canvases, as sharp as the PC catalogue.
   float head_h=20;
-  if(pg && pg->headline && *pg->headline && client_ui_sprite(pg->headline,mx,iy,0.5f)>0)head_h=32;
+  if(tw_language()==TW_EN && pg && pg->headline && *pg->headline && client_ui_sprite(pg->headline,mx,iy,0.5f)>0)head_h=32;
   else {
-    char head[160];snprintf(head,sizeof head,"%s",pg?pg->name:"Search results");text_fit(head,13,mw-(S.query[0]?70:0));
+    char head[160];snprintf(head,sizeof head,"%s",TR(pg?pg->name:"Search results"));text_fit(head,13,mw-(S.query[0]?70:0));
     text_draw(head,mx,iy+1,13,client_ui_rgb(INK),0);
   }
-  if(S.query[0])client_ui_button(mx+mw-64,iy-1,64,20,"Clear",CLEAR_QUERY,0);
+  if(S.query[0])client_ui_button(mx+mw-64,iy-1,64,20,TR("Clear"),CLEAR_QUERY,0);
   fill_rect(mx,iy+head_h,mw,1,client_ui_rgb(0x888888));
   book_offer_n=page_offers(book_offers,COUNT(book_offers));
   float gy=iy+head_h+6,strip_y=ib-50;
   if(pg&&!strcmp(pg->id,"60")){
-    client_ui_paragraph("Donate $5.00 USD or more for Tweebbo Club for life, Club and VIP badges and extra credits. Review the amount before paying.",mx,gy,mw,6,INK);
-    client_ui_button(mx,ib-42,mw,28,"Get Tweebbo Club",JOIN_CLUB,0);return;
+    client_ui_paragraph(TR("Donate $5.00 USD or more for Tweebbo Club for life, Club and VIP badges and extra credits. Review the amount before paying."),mx,gy,mw,6,INK);
+    client_ui_button(mx,ib-42,mw,28,TR("Get Tweebbo Club"),JOIN_CLUB,0);return;
   }
   if(!book_offer_n) {
     // Front page (and pages without products): the page text and the Exchange shortcut.
     const char *body=pg && pg->body && *pg->body?pg->body:"Welcome to the Tweebbo catalogue. Choose a section on the right; furniture you buy waits in your inventory.";
     if(pg && !strcmp(pg->id,"1"))body="Browse the ranges with L/R or the tabs on the right. Seasonal ranges change regularly, so check back for new items.";
     else if(pg && !strcmp(pg->id,"4"))body="Credit coins are bought with credits. Chip tokens are bought with chips, lock for 24 hours after a trade, and redeem back into chips.";
-    client_ui_paragraph(body,mx,gy,mw,wide?7:4,MUTED);
+    client_ui_paragraph(TR(body),mx,gy,mw,wide?7:4,MUTED);
     if(pg && !strcmp(pg->id,"1"))for(int i=0;i<cat_page_count;i++)if(!strcmp(cat_pages[i].id,"4")) {
       float by=gy+(wide?128:72);
       bool focus=client_ui_hot(mx,by,mw,40,SELECT_CATEGORY,i);
       if(focus)fill_round(mx-2,by-2,mw+4,44,5,client_ui_rgb(EDGE));
       fill_round(mx,by,mw,40,4,client_ui_rgb(0x7c1116));fill_round(mx+1,by+1,mw-2,38,3,client_ui_rgb(0xfbf1e3));
       if(*cat_pages[i].icon)client_ui_icon_fit(cat_pages[i].icon,mx+16,by+20,18);
-      text_draw("Tweebbo Exchange",mx+32,by+5,12,client_ui_rgb(0x7c1116),0);
-      text_draw("Credit coins and chip tokens you can trade.",mx+32,by+22,10,client_ui_rgb(MUTED),0);
+      text_draw(TR("Tweebbo Exchange"),mx+32,by+5,12,client_ui_rgb(0x7c1116),0);
+      text_draw(TR("Credit coins and chip tokens you can trade."),mx+32,by+22,10,client_ui_rgb(MUTED),0);
       break;
     }
-    if(!pg)client_ui_label("No products match the search.",mx,gy,mw,MUTED);
+    if(!pg)client_ui_label(TR("No products match the search."),mx,gy,mw,MUTED);
     return;
   }
   int pages=grid(mx,gy,mw,strip_y-24-gy,book_offer_n,offer_item);
@@ -424,28 +426,28 @@ static void book(float x, float y, float w, float h) {
   const CatOffer *o=offer();
   char price[96],action_ok=0;
   if(o) {
-    if(o->amount>1)snprintf(price,sizeof price,"%u credits / %u items",o->price,o->amount);else snprintf(price,sizeof price,"%u credits",o->price);
+    if(o->amount>1)snprintf(price,sizeof price,TR("%u credits / %u items"),o->price,o->amount);else snprintf(price,sizeof price,TR("%u credits"),o->price);
     action_ok=connected()&&o->available&&W.credits>=o->price&&!S.pending;
     strip(mx,strip_y,mw,o->def,o->name,price,!o->available?"Not available yet.":W.credits<o->price?"Not enough credits.":o->desc,"Buy",action_ok?BUY:0);
   } else {
-    snprintf(price,sizeof price,"Balance: %u credits",W.credits);
+    snprintf(price,sizeof price,TR("Balance: %u credits"),W.credits);
     strip(mx,strip_y,mw,0,"Choose a product",price,"Select an item for a closer look.",NULL,0);
   }
 }
 /** Inventory: your furniture as catalogue slots, the selected one ready to place. */
 static void hand(float x, float y, float w, float h) {
   float ix=x+10,iy=y+27,iw=w-20,ib=y+h-8;
-  char head[64];snprintf(head,sizeof head,"Inventory (%d)",W.inv_n);
+  char head[64];snprintf(head,sizeof head,TR("Inventory (%d)"),W.inv_n);
   text_draw(head,ix,iy+1,13,client_ui_rgb(INK),0);
-  client_ui_button(ix+iw-118,iy-1,118,20,"Room furniture",ROOM_LIST,0);
+  client_ui_button(ix+iw-118,iy-1,118,20,TR("Room furniture"),ROOM_LIST,0);
   fill_rect(ix,iy+20,iw,1,client_ui_rgb(0x888888));
   float gy=iy+26,strip_y=ib-50;
-  if(!W.inv_n){client_ui_paragraph("Your inventory is empty. Furniture you buy in the Catalogue waits here.",ix,gy,iw,3,MUTED);return;}
+  if(!W.inv_n){client_ui_paragraph(TR("Your inventory is empty. Furniture you buy in the Catalogue waits here."),ix,gy,iw,3,MUTED);return;}
   int pages=grid(ix,gy,iw,strip_y-24-gy,W.inv_n,owned_item);
   pager(ix,strip_y-21,iw,pages);
   InvItem *inv=owned();const FurniDef *d=inv?def_get(inv->def):NULL;
   if(inv) {
-    char n[96];snprintf(n,sizeof n,"%d in your inventory",inventory_count(inv->def));
+    char n[96];snprintf(n,sizeof n,TR("%d in your inventory"),inventory_count(inv->def));
     bool ok=connected()&&world_can_decorate()&&!S.pending;
     bool camera=d && !strcmp(d->name,"Camera");
     strip(ix,strip_y,iw,inv->def,d?d->name:"Item",n,camera?"Take a photo of this room.":world_can_decorate()?"Place it in this room.":"Enter a room you can decorate to place it.",camera?"Take photo":"Place",camera?OPEN_CAMERA:ok?PLACE:0);
@@ -455,26 +457,26 @@ static void hand(float x, float y, float w, float h) {
 static void placed(float x, float y, float w, float h) {
   float ix=x+10,iy=y+27,iw=w-20,ib=y+h-8;
   room_item_n=0;for(int i=0;i<MAX_ITEMS;i++)if(W.items[i].used)room_items[room_item_n++]=i;
-  char head[64];snprintf(head,sizeof head,"In this room (%d)",room_item_n);
+  char head[64];snprintf(head,sizeof head,TR("In this room (%d)"),room_item_n);
   text_draw(head,ix,iy+1,13,client_ui_rgb(INK),0);
-  client_ui_button(ix+iw-100,iy-1,100,20,"Inventory",INVENTORY_LIST,0);
+  client_ui_button(ix+iw-100,iy-1,100,20,TR("Inventory"),INVENTORY_LIST,0);
   fill_rect(ix,iy+20,iw,1,client_ui_rgb(0x888888));
   float gy=iy+26,strip_y=ib-50;
-  if(!room_item_n){client_ui_paragraph("There is no furniture in this room.",ix,gy,iw,2,MUTED);return;}
+  if(!room_item_n){client_ui_paragraph(TR("There is no furniture in this room."),ix,gy,iw,2,MUTED);return;}
   int pages=grid(ix,gy,iw,strip_y-24-gy,room_item_n,placed_item);
   pager(ix,strip_y-21,iw,pages);
   Item *it=world_item(room_pick);const FurniDef *d=it?def_get(it->def):NULL;
   if(it) {
-    char where[64];snprintf(where,sizeof where,"Tile %d, %d",it->x,it->y);
+    char where[64];snprintf(where,sizeof where,TR("Tile %d, %d"),it->x,it->y);
     strip(ix,strip_y,iw,it->def,d?d->name:"Item",where,world_can_arrange(it)?"Move, rotate or pick it up.":"You cannot arrange this item.","Open",SELECT_ITEM);
   } else strip(ix,strip_y,iw,0,"Choose an item","","Select furniture to move, rotate or pick it up.",NULL,0);
 }
 static void pages(float x, float y, float w, int count) {
   int n=(count+4)/5;if(n<1)n=1;if(S.page>=n)S.page=n-1;
   char s[32];snprintf(s,sizeof s,"%d / %d",S.page+1,n);
-  client_ui_button(x+8,y+188,80,24,"Previous",S.page?TURN_PAGE:0,-1);
+  client_ui_button(x+8,y+188,80,24,TR("Previous"),S.page?TURN_PAGE:0,-1);
   client_ui_label(s,x+115,y+194,90,0x18272a);
-  client_ui_button(x+w-88,y+188,80,24,"Next",S.page+1<n?TURN_PAGE:0,1);
+  client_ui_button(x+w-88,y+188,80,24,TR("Next"),S.page+1<n?TURN_PAGE:0,1);
 }
 void client_shop_draw(float x, float y, float w, float h) {
   if(S.panel==CATEGORIES || S.panel==OFFERS || S.panel==OFFER){book(x,y,w,h);return;}
@@ -483,44 +485,44 @@ void client_shop_draw(float x, float y, float w, float h) {
   char line[256];const CatOffer *o=offer();Item *it=world_item(S.item);InvItem *inv=owned();
   if(S.panel==INTERACT) {
     const FurniDef *d=it?def_get(it->def):NULL;int ids[32],n=drinks(d,ids);
-    client_ui_label(d?d->name:"Item no longer available",x+10,y+30,w-20,0x18272a);
+    client_ui_label(d?d->name:TR("Item no longer available"),x+10,y+30,w-20,0x18272a);
     icon(it?it->def:0,x+8,y+55);
     if(n) {
       if(S.drink<0 || S.drink>=n)S.drink=0;
       client_ui_paragraph(drink_label(ids[S.drink]),x+104,y+59,w-114,3,0x18272a);
-      client_ui_button(x+104,y+114,94,24,"Previous",n>1?DRINK_STEP:0,-1);
-      client_ui_button(x+204,y+114,w-212,24,"Next",n>1?DRINK_STEP:0,1);
-      client_ui_button(x+104,y+148,w-112,26,"Get a drink",interaction_ready(d)&&!S.pending?GET_DRINK:0,0);
+      client_ui_button(x+104,y+114,94,24,TR("Previous"),n>1?DRINK_STEP:0,-1);
+      client_ui_button(x+204,y+114,w-212,24,TR("Next"),n>1?DRINK_STEP:0,1);
+      client_ui_button(x+104,y+148,w-112,26,TR("Get a drink"),interaction_ready(d)&&!S.pending?GET_DRINK:0,0);
     } else {
       const char *action=use_label(d,it);
-      if(d && d->casino)client_ui_button(x+104,y+60,w-112,26,"Open casino game",connected()?OPEN_CASINO:0,0);
+      if(d && d->casino)client_ui_button(x+104,y+60,w-112,26,TR("Open casino game"),connected()?OPEN_CASINO:0,0);
       else if(action)client_ui_button(x+104,y+60,w-112,26,action,interaction_ready(d)&&!S.pending&&!(d->kind==KIND_DICE && it->state==7)?USE_ITEM:0,0);
-      else client_ui_paragraph("No direct action for this furniture.",x+104,y+60,w-114,4,0x26373a);
-      if(d && d->kind==KIND_DICE && it->state && it->state!=7)client_ui_button(x+104,y+94,w-112,26,"Close dice",connected()&&!S.pending?CLOSE_DICE:0,0);
+      else client_ui_paragraph(TR("No direct action for this furniture."),x+104,y+60,w-114,4,0x26373a);
+      if(d && d->kind==KIND_DICE && it->state && it->state!=7)client_ui_button(x+104,y+94,w-112,26,TR("Close dice"),connected()&&!S.pending?CLOSE_DICE:0,0);
       if(d && d->desc)client_ui_paragraph(d->desc,x+10,y+150,w-20,2,0x26373a);
-      if(d && net_state()==NET_OFFLINE && !interaction_ready(d))client_ui_label("This action requires a hotel connection.",x+10,y+174,w-20,0x26373a);
+      if(d && net_state()==NET_OFFLINE && !interaction_ready(d))client_ui_label(TR("This action requires a hotel connection."),x+10,y+174,w-20,0x26373a);
     }
-    client_ui_button(x+8,y+188,w-16,24,"Furniture details",BACK,0);return;
+    client_ui_button(x+8,y+188,w-16,24,TR("Furniture details"),BACK,0);return;
   }
   if(S.panel==SPACES || S.panel==CONFIRM_FINISH) {
     const FinishChoice *f=finish();if(!f)return;
-    client_ui_label("Spaces",x+10,y+30,w-20,0x18272a);
-    client_ui_button(x+8,y+53,140,24,"Wallpaper",!S.pending?FINISH_KIND:0,1);
-    client_ui_button(x+156,y+53,146,24,"Floor",!S.pending?FINISH_KIND:0,2);
+    client_ui_label(TR("Spaces"),x+10,y+30,w-20,0x18272a);
+    client_ui_button(x+8,y+53,140,24,TR("Wallpaper"),!S.pending?FINISH_KIND:0,1);
+    client_ui_button(x+156,y+53,146,24,TR("Floor"),!S.pending?FINISH_KIND:0,2);
     fill_rect(x+12,y+88,32,32,0xff000000|((f->color&255)<<16)|(f->color&0xff00)|((f->color>>16)&255));
     snprintf(line,sizeof line,"%s %s",f->kind==1?"Wallpaper":"Floor",f->id);
     client_ui_label(line,x+52,y+90,w-62,0x18272a);
-    snprintf(line,sizeof line,"%d credits / balance %u",finish_price,W.credits);
+    snprintf(line,sizeof line,TR("%d credits / balance %u"),finish_price,W.credits);
     client_ui_label(line,x+52,y+109,w-62,0x26373a);
     if(S.panel==SPACES) {
-      client_ui_button(x+8,y+130,72,24,"Previous",!S.pending?FINISH_STEP:0,-1);
-      client_ui_button(x+86,y+130,72,24,"Next",!S.pending?FINISH_STEP:0,1);
-      client_ui_button(x+164,y+130,138,24,S.preview?"End preview":"Room preview",W.room_owner&&!S.pending?FINISH_PREVIEW:0,0);
-    } else client_ui_label("Apply this finish to the room?",x+10,y+135,w-20,0x18272a);
+      client_ui_button(x+8,y+130,72,24,TR("Previous"),!S.pending?FINISH_STEP:0,-1);
+      client_ui_button(x+86,y+130,72,24,TR("Next"),!S.pending?FINISH_STEP:0,1);
+      client_ui_button(x+164,y+130,138,24,S.preview?TR("End preview"):TR("Room preview"),W.room_owner&&!S.pending?FINISH_PREVIEW:0,0);
+    } else client_ui_label(TR("Apply this finish to the room?"),x+10,y+135,w-20,0x18272a);
     const char *note=S.pending?S.status:!W.room_owner?"Enter a room you own to apply it.":!strcmp(f->id,f->kind==1?W.wall:W.floor)?"Already applied.":W.credits<(u32)finish_price?"Not enough credits.":"Purchase replaces the current finish.";
     client_ui_label(note,x+10,y+165,w-20,0x26373a);
-    client_ui_button(x+8,y+188,80,24,"Back",BACK,0);
-    client_ui_button(x+154,y+188,148,24,S.panel==SPACES?"Buy finish":"Confirm purchase",can_buy_finish()?(S.panel==SPACES?FINISH_BUY:FINISH_CONFIRM):0,0);
+    client_ui_button(x+8,y+188,80,24,TR("Back"),BACK,0);
+    client_ui_button(x+154,y+188,148,24,S.panel==SPACES?TR("Buy finish"):TR("Confirm purchase"),can_buy_finish()?(S.panel==SPACES?FINISH_BUY:FINISH_CONFIRM):0,0);
     return;
   }
   if(S.panel==CATEGORIES || S.panel==OFFERS || S.panel==INVENTORY || S.panel==ROOM_ITEMS) {
@@ -532,13 +534,13 @@ void client_shop_draw(float x, float y, float w, float h) {
     int count=(n+4)/5;if(S.page>=count)S.page=count?count-1:0;
     const char *title=S.panel==CATEGORIES?"Catalogue":S.panel==OFFERS?(S.category==-1?"Search results":cat_pages[S.category].name):S.panel==INVENTORY?"Inventory":"Room furniture";
     client_ui_label(title,x+10,y+30,w-98,0x18272a);
-    if(S.panel==OFFERS)client_ui_button(x+w-86,y+26,78,22,"Sections",BACK,0);
-    if(S.panel==CATEGORIES)client_ui_button(x+w-86,y+26,78,22,"Search",SEARCH_OFFERS,0);
-    if(!n)client_ui_label(S.panel==INVENTORY?"Your inventory is empty.":"No items here.",x+10,y+67,w-20,0x26373a);
+    if(S.panel==OFFERS)client_ui_button(x+w-86,y+26,78,22,TR("Sections"),BACK,0);
+    if(S.panel==CATEGORIES)client_ui_button(x+w-86,y+26,78,22,TR("Search"),SEARCH_OFFERS,0);
+    if(!n)client_ui_label(S.panel==INVENTORY?TR("Your inventory is empty."):TR("No items here."),x+10,y+67,w-20,0x26373a);
     for(int row=0;row<5 && S.page*5+row<n;row++) {
       int i=S.page*5+row,cmd,arg;const char *name;
-      if(S.panel==CATEGORIES){cmd=SELECT_CATEGORY;arg=i;name=cat_pages[i].name;}
-      else if(S.panel==OFFERS){const CatOffer *a=&cat_offers[indices[i]];cmd=SELECT_OFFER;arg=indices[i];snprintf(line,sizeof line,"%s - %u credits",a->name,a->price);name=line;}
+      if(S.panel==CATEGORIES){cmd=SELECT_CATEGORY;arg=i;name=TR(cat_pages[i].name);}
+      else if(S.panel==OFFERS){const CatOffer *a=&cat_offers[indices[i]];cmd=SELECT_OFFER;arg=indices[i];snprintf(line,sizeof line,TR("%s - %u credits"),TR(a->name),a->price);name=line;}
       else {
         u16 def;u32 id;
         if(S.panel==INVENTORY){def=W.inv[i].def;id=W.inv[i].id;cmd=SELECT_OWNED;}
@@ -551,52 +553,52 @@ void client_shop_draw(float x, float y, float w, float h) {
   } else {
     u16 def=S.panel==OFFER&&o?o->def:S.panel==OWNED&&inv?inv->def:S.panel==BUILD?S.ghost.def:it?it->def:0;
     const FurniDef *d=def_get(def);
-    client_ui_label(S.panel==OFFER&&o?o->name:d?d->name:"Item no longer available",x+10,y+30,w-20,0x18272a);
+    client_ui_label(S.panel==OFFER&&o?o->name:d?d->name:TR("Item no longer available"),x+10,y+30,w-20,0x18272a);
     icon(def,x+8,y+53);
     if(S.panel==OFFER && o) {
-      snprintf(line,sizeof line,"%u credits / %u item%s",o->price,o->amount,o->amount==1?"":"s");client_ui_label(line,x+104,y+57,w-114,0x18272a);
-      snprintf(line,sizeof line,"Balance: %u",W.credits);client_ui_label(line,x+104,y+81,w-114,0x26373a);
-      client_ui_label(o->available?W.credits>=o->price?"Confirm to purchase.":"Not enough credits.":"Not available.",x+104,y+105,w-114,0x26373a);
-      client_ui_paragraph(o->desc,x+10,y+145,w-20,2,0x26373a);
-      client_ui_button(x+w-144,y+188,136,24,"Confirm purchase",connected()&&o->available&&W.credits>=o->price&&!S.pending?BUY:0,0);
+      snprintf(line,sizeof line,TR("%u credits / %u item%s"),o->price,o->amount,o->amount==1||tw_language()==TW_ZH||tw_language()==TW_JA?"":"s");client_ui_label(line,x+104,y+57,w-114,0x18272a);
+      snprintf(line,sizeof line,TR("Balance: %u"),W.credits);client_ui_label(line,x+104,y+81,w-114,0x26373a);
+      client_ui_label(o->available?W.credits>=o->price?TR("Confirm to purchase."):TR("Not enough credits."):TR("Not available."),x+104,y+105,w-114,0x26373a);
+      client_ui_paragraph(TR(o->desc),x+10,y+145,w-20,2,0x26373a);
+      client_ui_button(x+w-144,y+188,136,24,TR("Confirm purchase"),connected()&&o->available&&W.credits>=o->price&&!S.pending?BUY:0,0);
     } else if(S.panel==OWNED) {
-      client_ui_label(world_can_decorate()?"Place this item in the room.":"Enter a room you can decorate.",x+104,y+62,w-114,0x26373a);
-      client_ui_button(x+104,y+100,w-112,26,"Place",inv&&connected()&&world_can_decorate()&&!S.pending?PLACE:0,0);
+      client_ui_label(world_can_decorate()?TR("Place this item in the room."):TR("Enter a room you can decorate."),x+104,y+62,w-114,0x26373a);
+      client_ui_button(x+104,y+100,w-112,26,TR("Place"),inv&&connected()&&world_can_decorate()&&!S.pending?PLACE:0,0);
     } else if(S.panel==BUILD) {
-      snprintf(line,sizeof line,"Tile %d, %d / height %d",S.ghost.x,S.ghost.y,S.ghost.z);client_ui_label(line,x+104,y+57,w-114,0x18272a);
-      client_ui_label(S.ghost.ok?"Free spot":"Choose a free spot",x+104,y+81,w-114,0x26373a);
+      snprintf(line,sizeof line,TR("Tile %d, %d / height %d"),S.ghost.x,S.ghost.y,S.ghost.z);client_ui_label(line,x+104,y+57,w-114,0x18272a);
+      client_ui_label(S.ghost.ok?TR("Free spot"):TR("Choose a free spot"),x+104,y+81,w-114,0x26373a);
       // Touch arrows as well as the D-pad: docked, every step is also on the pad (see the bar).
       client_ui_arrow(x+104,y+106,30,22,"<",!S.pending?GHOST_STEP:0,3);
       client_ui_arrow(x+138,y+106,30,22,"^",!S.pending?GHOST_STEP:0,0);
       client_ui_arrow(x+172,y+106,30,22,"v",!S.pending?GHOST_STEP:0,2);
       client_ui_arrow(x+206,y+106,30,22,">",!S.pending?GHOST_STEP:0,1);
 #if TWEEBBO_DEVICE == 3
-      client_ui_key_hint("D-pad","Move",x+10,y+147,0x18272a,0x26373a);
-      client_ui_key_hint("L/R",S.ghost.wall?"Lower / raise":"Rotate",x+150,y+147,0x18272a,0x26373a);
+      client_ui_key_hint("D-pad",TR("Move"),x+10,y+147,0x18272a,0x26373a);
+      client_ui_key_hint("L/R",S.ghost.wall?TR("Lower / raise"):TR("Rotate"),x+150,y+147,0x18272a,0x26373a);
 #else
-      client_ui_key_hint("D-pad","Move",x+10,y+147,0x18272a,0x26373a);
-      client_ui_key_hint("L/R",S.ghost.wall?"Lower / raise":"Rotate",x+110,y+147,0x18272a,0x26373a);
-      client_ui_key_hint("ZL/ZR",S.ghost.wall?"Height":"Rotate",x+10,y+165,0x18272a,0x26373a);
+      client_ui_key_hint("D-pad",TR("Move"),x+10,y+147,0x18272a,0x26373a);
+      client_ui_key_hint("L/R",S.ghost.wall?TR("Lower / raise"):TR("Rotate"),x+110,y+147,0x18272a,0x26373a);
+      client_ui_key_hint("ZL/ZR",S.ghost.wall?TR("Height"):TR("Rotate"),x+10,y+165,0x18272a,0x26373a);
 #endif
-      client_ui_button(x+96,y+188,102,24,S.ghost.wall?"Raise":"Rotate",!S.pending?ROTATE_GHOST:0,1);
-      client_ui_button(x+204,y+188,w-212,24,"Place",S.ghost.ok&&!S.pending?PLACE_GHOST:0,0);
+      client_ui_button(x+96,y+188,102,24,S.ghost.wall?TR("Raise"):TR("Rotate"),!S.pending?ROTATE_GHOST:0,1);
+      client_ui_button(x+204,y+188,w-212,24,TR("Place"),S.ghost.ok&&!S.pending?PLACE_GHOST:0,0);
     } else if(S.panel==CONFIRM_ITEM) {
       // Chip tokens (Tweebbo Exchange) pay chips; the server keeps a token received in a trade
       // locked for 24 hours (it can still be traded) and says how long is left.
       const FurniDef *cd=it?def_get(it->def):NULL;
       char question[96];
-      if(cd&&cd->chips)snprintf(question,sizeof question,"Redeem this token for %lu chips?",(unsigned long)cd->chips);
-      client_ui_paragraph(S.confirm!=REDEEM_ITEM?"Return this item to inventory?":cd&&cd->chips?question:"Redeem this item for credits?",x+104,y+62,w-114,3,0x18272a);
-      client_ui_label(S.confirm!=REDEEM_ITEM?"Its owner receives the item.":cd&&cd->chips?"Tokens received in a trade: 24 h before redeeming.":"The item will be consumed.",x+10,y+151,w-20,0x26373a);
-      client_ui_button(x+w-144,y+188,136,24,"Confirm",it&&!S.pending?CONFIRM_ITEM_ACTION:0,0);
+      if(cd&&cd->chips)snprintf(question,sizeof question,TR("Redeem this token for %lu chips?"),(unsigned long)cd->chips);
+      client_ui_paragraph(S.confirm!=REDEEM_ITEM?TR("Return this item to inventory?"):cd&&cd->chips?question:TR("Redeem this item for credits?"),x+104,y+62,w-114,3,0x18272a);
+      client_ui_label(S.confirm!=REDEEM_ITEM?TR("Its owner receives the item."):cd&&cd->chips?TR("Tokens received in a trade: 24 h before redeeming."):TR("The item will be consumed."),x+10,y+151,w-20,0x26373a);
+      client_ui_button(x+w-144,y+188,136,24,TR("Confirm"),it&&!S.pending?CONFIRM_ITEM_ACTION:0,0);
     } else if(S.panel==ROOM_ITEM && it) {
       bool arrange=connected()&&world_can_decorate()&&world_can_arrange(it)&&!S.pending,manage=connected()&&world_can_manage(it)&&!S.pending;
-      client_ui_button(x+104,y+55,w-112,24,"Move",arrange?MOVE_ITEM:0,0);
-      client_ui_button(x+104,y+83,w-112,24,"Rotate",arrange?ROTATE_ITEM:0,0);
-      client_ui_button(x+104,y+111,w-112,24,"Pick up",manage?PICKUP_ITEM:0,0);
-      if(d && ((d->flags&DEF_REDEEM) || d->chips))client_ui_button(x+104,y+139,w-112,24,"Redeem",manage&&it->owner==W.guest_id?REDEEM_ITEM:0,0);
-      client_ui_button(x+96,y+188,w-104,24,"Interact",!S.pending?INTERACTIONS:0,0);
+      client_ui_button(x+104,y+55,w-112,24,TR("Move"),arrange?MOVE_ITEM:0,0);
+      client_ui_button(x+104,y+83,w-112,24,TR("Rotate"),arrange?ROTATE_ITEM:0,0);
+      client_ui_button(x+104,y+111,w-112,24,TR("Pick up"),manage?PICKUP_ITEM:0,0);
+      if(d && ((d->flags&DEF_REDEEM) || d->chips))client_ui_button(x+104,y+139,w-112,24,TR("Redeem"),manage&&it->owner==W.guest_id?REDEEM_ITEM:0,0);
+      client_ui_button(x+96,y+188,w-104,24,TR("Interact"),!S.pending?INTERACTIONS:0,0);
     }
-    client_ui_button(x+8,y+188,80,24,"Back",S.ghost.on&&S.pending?0:BACK,0);
+    client_ui_button(x+8,y+188,80,24,TR("Back"),S.ghost.on&&S.pending?0:BACK,0);
   }
 }

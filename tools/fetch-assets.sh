@@ -20,7 +20,9 @@ rm -f romfs/gfx/atlas*.png romfs/furni/*.png
 # Atlas pages, bitmap font and the classic room backgrounds/scenes.
 # The export decides how many pages there are (atlas0..N and atlasg0..N).
 cp "$GFX"/atlas*.png romfs/gfx/
-cp "$SRC"/build/gfx/font0.png romfs/gfx/
+cp "$SRC"/build/gfx/font*.png romfs/gfx/
+mkdir -p romfs/lang
+cp "$SRC"/romfs/lang/* romfs/lang/
 cp "$GFX"/pets_*.png romfs/gfx/
 cp "$GFX"/room_*.png romfs/gfx/ 2>/dev/null || true
 cp "$GFX"/scene_*.png romfs/gfx/ 2>/dev/null || true
@@ -29,10 +31,21 @@ cp "$GFX"/furni/*.png romfs/furni/
 # Sprite coordinates and texture pages must come from the same export. The local
 # assets.h stays because the console RoomItem also carries the offline item state.
 mkdir -p source/gen
-cp build/pack-hd/gen/assets.c build/pack-hd/gen/character_skins.h build/pack-hd/gen/igloo.h "$SRC/source/gen/font.c" source/gen/
+cp build/pack-hd/gen/game_rooms.h build/pack-hd/gen/assets.c build/pack-hd/gen/character_skins.h build/pack-hd/gen/igloo.h "$SRC/source/gen/font.c" source/gen/
 echo "romfs ready: $(ls romfs/gfx | wc -l) gfx files, $(ls romfs/furni | wc -l) furniture textures"
 
 mkdir -p romfs/snow
 cp "$SRC"/build/snow/*.png "$SRC"/romfs/snow/game.js romfs/snow/
 cp "$SRC"/source/gen/snow_assets.[ch] source/gen/
 cp "$SRC"/romfs/snow/*.pcm romfs/snow/
+
+mkdir -p romfs/fastfood
+cp "$SRC"/build/fastfood/*.png "$SRC"/romfs/fastfood/game.js romfs/fastfood/
+cp "$SRC"/source/gen/fastfood_assets.[ch] source/gen/
+mkdir -p romfs/battle
+rm -f romfs/battle/arena[1-5]_*.png
+cp "$SRC"/build/battle/*.png "$SRC"/romfs/battle/game.js romfs/battle/
+cp "$SRC"/source/gen/battle_assets.[ch] source/gen/
+cp "$SRC"/romfs/fastfood/*.pcm romfs/fastfood/
+cp "$SRC"/romfs/battle/*.pcm romfs/battle/
+cp "$SRC"/source/gen/game_audio_assets.[ch] source/gen/

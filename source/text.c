@@ -1,5 +1,6 @@
 // Bitmap text over gfx_font_sprite (ported from the 3DS gfx.c text path).
 #include "gfx.h"
+#include "language.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -30,7 +31,7 @@ static const FontGlyph *glyph(unsigned code, int size) {
     if (key == k) return g;
     if (k < key) lo = mid + 1; else hi = mid - 1;
   }
-  return NULL;
+  return (tw_language()==TW_ZH||tw_language()==TW_JA)?tw_cjk_glyph(code):NULL;
 }
 
 static float bitmap_width(const char *s, int size) {
@@ -55,7 +56,8 @@ float text_draw(const char *s, float x, float y, float size, u32 color, int alig
     const FontGlyph *g = glyph(utf8_next(&s), px);
     if (!g) g = glyph('?', px);
     if (!g) continue;
-    gfx_font_sprite(g->x, g->y, g->w, g->h, x + g->left, y + px + g->top, false, color);
+    if(g->code>255&&g==tw_cjk_glyph(g->code))gfx_cjk_sprite(g->x,g->y,g->w,g->h,x+g->left,y+px+g->top,color);
+    else gfx_font_sprite(g->x, g->y, g->w, g->h, x + g->left, y + px + g->top, false, color);
     x += g->advance;
   }
   return width;

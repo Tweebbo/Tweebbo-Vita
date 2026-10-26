@@ -1,3 +1,8 @@
+#include "client_fastfood.h"
+#include "language.h"
+#include "gen/game_rooms.h"
+#include "client_battle.h"
+#include "fastfood.h"
 #include "client_ui.h"
 #define DONATE_LABEL (SCREEN_W >= 600 ? "Donate / TC" : "Donate")
 #include "client_shop.h"
@@ -33,7 +38,7 @@
 enum { CLOSED, ROOMS, CHAT, ME, DRESS, HELP, KEYBOARD, NEW_ROOM, PEOPLE, PERSON, CONFIRM, RIGHTS, MORE, SHOP, SOCIAL, GAMES, PETS, SETTINGS, LOCK_CONFIRM, TRADE, ACTIONS, CASINO, SNOW, POOL, BAR, IDENTITY, MUSIC, CHIPS, SUPPORT, UPDATE, DELETE_CONFIRM };
 enum { OPEN = 1, CLOSE, REFRESH, SCOPE, ENTER_ROOM, PAGE, WRITE, RENAME, CATEGORY,
        STYLE, COLOR, SAVE_LOOK, KEY, BACKSPACE, SHIFT, SPACE, SUBMIT, OFFLINE, RESUME, LOBBY,
-       PICK_STYLE, PICK_COLOR, SEARCH, CLEAR_SEARCH, MODEL, CREATE_ROOM, SELECT_PERSON, MODERATE, CONFIRM_MOD, SYMBOLS, REVOKE, UNBAN, OPEN_SHOP, REMOVE_LOCK, SAVE_LOCK, GESTURE, PUT_DRINK_AWAY, ACTIVITY_CONTEXT, GOTO_CASINO, PAY_CODE, UPDATE_LATER, UPDATE_INSTALL, UPDATE_CHECK, UPDATE_RESTART, UPDATE_CLOSE, CHECK_UPDATES };
+       PICK_STYLE, PICK_COLOR, SEARCH, CLEAR_SEARCH, MODEL, CREATE_ROOM, SELECT_PERSON, MODERATE, CONFIRM_MOD, SYMBOLS, REVOKE, UNBAN, OPEN_SHOP, REMOVE_LOCK, SAVE_LOCK, GESTURE, PUT_DRINK_AWAY, ACTIVITY_CONTEXT, GOTO_CASINO, PAY_CODE, UPDATE_LATER, UPDATE_INSTALL, UPDATE_CHECK, UPDATE_RESTART, UPDATE_CLOSE, CHECK_UPDATES, CHOOSE_LANGUAGE };
 #ifdef TWEEBBO_LAN_ONLY
 #define RETURN_LABEL "Return to LAN hotel"
 #else
@@ -44,8 +49,11 @@ enum { DELETE_ROOM=99, ALERT_CLOSE=100 };
 #define CAMERA 31
 #define FEEDBACK 32
 #define DOORBELL 33
+#define FASTFOOD 34
+#define BATTLE 35
+#define LANGUAGE 36
 typedef struct { float x, y, w, h; int cmd, arg; } Button;
-typedef struct { char slug[48], title[164], owner[40], label[48], icon[32]; int online, priority; bool locked, featured, credits; } Room;
+typedef struct { char slug[48], title[164], owner[40], label[128], icon[32]; int online, priority; bool locked, featured, credits, official; } Room;
 static struct {
   int panel, focus, count, scope, page, room_n, job, category, shop_kind, edit, return_panel;
   bool shift, tv, keyboard_focus, symbols, secret;
@@ -432,7 +440,7 @@ static void classic_tools(float margin, float bar) {
       avatar_draw_head(me->look, 3, cx - ANCHOR_X*0.5f, (wide ? y+6 : y+11) - 36*0.5f, 0.5f);
     else if (t->cmd == OPEN && t->arg == MORE) more_dots(cx, icy, on ? SM_GOLD : 0xffffff);
     else if (t->icon) ui_icon_fit(t->icon, cx, icy, box);
-    if (wide) text_draw(t->label, cx, y+14, 10, color(on ? SM_GOLD : 0xdfe8ea), 1);
+    if (wide) text_draw(TR(t->label), cx, y+14, 10, color(on ? SM_GOLD : 0xdfe8ea), 1);
     if (on) fill_round(cx-7, bar+28, 14, 2, 1, color(SM_GOLD));
     // Glyph mode: the pad shortcut on the tools that have one.
     if (glyphs() && !U.panel) {
@@ -460,9 +468,9 @@ static void classic_hud(float margin) {
   ui_icon_at("tweebbo-mark@18", x+14, y+13);
   char buf[32];
   float rx = x + w - 5;
-  float dw = text_width("Donate", 11) + 18;
+  float dw = text_width(TR("Donate"), 11) + 18;
   fill_round(rx-dw, y+4, dw, 18, 9, color(SM_GOLD));
-  text_draw("Donate", rx-dw/2, y+6, 11, color(SM_GOLD_INK), 1);
+  text_draw(TR("Donate"), rx-dw/2, y+6, 11, color(SM_GOLD_INK), 1);
   if (!U.panel) hotspot(rx-dw, y+2, dw, 22, OPEN, SUPPORT);
   rx -= dw + 6;
   snprintf(buf, sizeof buf, "%u", (unsigned)W.chips);
@@ -485,7 +493,7 @@ static void classic_hud(float margin) {
   text_draw(buf, rx-ow, y+6, 11, color(SM_SOFT), 0);
   fill_circle(rx-ow-7, y+13, 3, color(CL_ONLINE));
   rx -= ow + 16;
-  char t[164]; copy(t, sizeof t, W.in_room ? W.title : "Tweebbo"); text_fit(t, 12, rx-(x+30));
+  char t[164]; copy(t, sizeof t, W.in_room ? (W.owner?W.title:TR(W.title)) : "Tweebbo"); text_fit(t, 12, rx-(x+30));
   text_draw(t, x+30, y+5, 12, color(0xffffff), 0);
 }
 /** The update window: offer, download progress and install instructions. */
@@ -493,60 +501,60 @@ static void update_draw(float x, float y, float w) {
   UpdateState st = update_state();
   char text[240];
   if (st == UPD_CHECKING) {
-    client_ui_paragraph("Searching GitHub for the newest Tweebbo release...", x + 12, y + 40, w - 24, 3, CL_INK);
-    client_ui_paragraph("The hotel keeps running while Tweebbo checks.", x + 12, y + 110, w - 24, 2, CL_MUTED);
-    button(x + 8, y + 188, w - 16, 26, "Close", UPDATE_CLOSE, 0);
+    client_ui_paragraph(TR("Searching GitHub for the newest Tweebbo release..."), x + 12, y + 40, w - 24, 3, CL_INK);
+    client_ui_paragraph(TR("The hotel keeps running while Tweebbo checks."), x + 12, y + 110, w - 24, 2, CL_MUTED);
+    button(x + 8, y + 188, w - 16, 26, TR("Close"), UPDATE_CLOSE, 0);
   } else if (st == UPD_AVAILABLE) {
-    snprintf(text, sizeof text, "Tweebbo %s is available.", update_version());
+    snprintf(text, sizeof text, TR("Tweebbo %s is available."), update_version());
     label(text, x + 12, y + 34, w - 24, CL_INK);
-    client_ui_paragraph(update_notes()[0] ? update_notes() : "Your character, rooms and purchases stay the same.", x + 12, y + 60, w - 24, 6, CL_INK);
-    client_ui_paragraph("Update now? The download continues if the connection drops.", x + 12, y + 150, w - 24, 2, CL_MUTED);
-    button(x + 8, y + 188, 140, 26, "Later", UPDATE_LATER, 0);
-    button(x + 156, y + 188, 146, 26, "Update now", UPDATE_INSTALL, 0);
+    client_ui_paragraph(update_notes()[0] ? update_notes() : TR("Your character, rooms and purchases stay the same."), x + 12, y + 60, w - 24, 6, CL_INK);
+    client_ui_paragraph(TR("Update now? The download continues if the connection drops."), x + 12, y + 150, w - 24, 2, CL_MUTED);
+    button(x + 8, y + 188, 140, 26, TR("Later"), UPDATE_LATER, 0);
+    button(x + 156, y + 188, 146, 26, TR("Update now"), UPDATE_INSTALL, 0);
   } else if (st == UPD_DOWNLOADING) {
     int pct = (int)(update_progress() * 100);
-    snprintf(text, sizeof text, "Downloading Tweebbo %s... %d%%", update_version(), pct);
+    snprintf(text, sizeof text, TR("Downloading Tweebbo %s... %d%%"), update_version(), pct);
     label(text, x + 12, y + 40, w - 24, CL_INK);
     fill_round(x + 12, y + 70, w - 24, 14, 7, color(CL_SHADE));
     if (pct > 0) fill_round(x + 12, y + 70, (w - 24) * pct / 100.0f, 14, 7, color(CL_ONLINE));
-    client_ui_paragraph("Keep Tweebbo open. If the connection drops, the download resumes where it stopped.", x + 12, y + 102, w - 24, 3, CL_MUTED);
-    client_ui_paragraph("The release is checked against its SHA-256 before installing.", x + 12, y + 150, w - 24, 2, CL_MUTED);
+    client_ui_paragraph(TR("Keep Tweebbo open. If the connection drops, the download resumes where it stopped."), x + 12, y + 102, w - 24, 3, CL_MUTED);
+    client_ui_paragraph(TR("The release is checked against its SHA-256 before installing."), x + 12, y + 150, w - 24, 2, CL_MUTED);
   } else if (st == UPD_INSTALLED) {
 #if TWEEBBO_DEVICE == 3
-    label("Update downloaded", x + 12, y + 36, w - 24, CL_ONLINE);
-    client_ui_paragraph("Open VitaShell and install this file. Your character and rooms stay the same.", x + 12, y + 66, w - 24, 3, CL_INK);
+    label(TR("Update downloaded"), x + 12, y + 36, w - 24, CL_ONLINE);
+    client_ui_paragraph(TR("Open VitaShell and install this file. Your character and rooms stay the same."), x + 12, y + 66, w - 24, 3, CL_INK);
     snprintf(text, sizeof text, "%s", update_installed_path());
     client_ui_paragraph(text, x + 12, y + 106, w - 24, 3, CL_MUTED);
-    button(x + 8, y + 188, w - 16, 26, "Close", UPDATE_CLOSE, 0);
+    button(x + 8, y + 188, w - 16, 26, TR("Close"), UPDATE_CLOSE, 0);
 #else
-    label("Update installed", x + 12, y + 36, w - 24, CL_ONLINE);
-    client_ui_paragraph("Close Tweebbo and open it again from the Homebrew Menu to use the new version. Your character and rooms stay the same.", x + 12, y + 66, w - 24, 5, CL_INK);
-    button(x + 8, y + 188, 140, 26, "Later", UPDATE_CLOSE, 0);
-    button(x + 156, y + 188, 146, 26, "Restart now", UPDATE_RESTART, 0);
+    label(TR("Update installed"), x + 12, y + 36, w - 24, CL_ONLINE);
+    client_ui_paragraph(TR("Close Tweebbo and open it again from the Homebrew Menu to use the new version. Your character and rooms stay the same."), x + 12, y + 66, w - 24, 5, CL_INK);
+    button(x + 8, y + 188, 140, 26, TR("Later"), UPDATE_CLOSE, 0);
+    button(x + 156, y + 188, 146, 26, TR("Restart now"), UPDATE_RESTART, 0);
 #endif
   } else if (st == UPD_FAILED) {
-    label("Update not installed", x + 12, y + 36, w - 24, CL_RED);
-    client_ui_paragraph(update_error()[0] ? update_error() : "The update could not be installed.", x + 12, y + 64, w - 24, 5, CL_INK);
-    client_ui_paragraph("A partial download is kept: searching again resumes it.", x + 12, y + 150, w - 24, 2, CL_MUTED);
-    button(x + 8, y + 188, 140, 26, "Later", UPDATE_LATER, 0);
-    button(x + 156, y + 188, 146, 26, "Try again", UPDATE_CHECK, 0);
+    label(TR("Update not installed"), x + 12, y + 36, w - 24, CL_RED);
+    client_ui_paragraph(update_error()[0] ? update_error() : TR("The update could not be installed."), x + 12, y + 64, w - 24, 5, CL_INK);
+    client_ui_paragraph(TR("A partial download is kept: searching again resumes it."), x + 12, y + 150, w - 24, 2, CL_MUTED);
+    button(x + 8, y + 188, 140, 26, TR("Later"), UPDATE_LATER, 0);
+    button(x + 156, y + 188, 146, 26, TR("Try again"), UPDATE_CHECK, 0);
   } else if (st == UPD_LATEST) {
-    snprintf(text, sizeof text, "You have the latest version (%s).", update_current());
+    snprintf(text, sizeof text, TR("You have the latest version (%s)."), update_current());
     label(text, x + 12, y + 40, w - 24, CL_INK);
-    client_ui_paragraph("Tweebbo searches for updates when you enter the hotel. You can search again here at any time.", x + 12, y + 82, w - 24, 4, CL_MUTED);
-    button(x + 8, y + 188, w - 16, 26, "Close", UPDATE_CLOSE, 0);
+    client_ui_paragraph(TR("Tweebbo searches for updates when you enter the hotel. You can search again here at any time."), x + 12, y + 82, w - 24, 4, CL_MUTED);
+    button(x + 8, y + 188, w - 16, 26, TR("Close"), UPDATE_CLOSE, 0);
   } else {
-    label("Tweebbo updates", x + 12, y + 40, w - 24, CL_INK);
-    client_ui_paragraph("Search GitHub for the newest release. Tweebbo installs it inside the game.", x + 12, y + 70, w - 24, 4, CL_MUTED);
-    button(x + 8, y + 188, 140, 26, "Later", UPDATE_LATER, 0);
-    button(x + 156, y + 188, 146, 26, "Search now", UPDATE_CHECK, 0);
+    label(TR("Tweebbo updates"), x + 12, y + 40, w - 24, CL_INK);
+    client_ui_paragraph(TR("Search GitHub for the newest release. Tweebbo installs it inside the game."), x + 12, y + 70, w - 24, 4, CL_MUTED);
+    button(x + 8, y + 188, 140, 26, TR("Later"), UPDATE_LATER, 0);
+    button(x + 156, y + 188, 146, 26, TR("Search now"), UPDATE_CHECK, 0);
   }
 }
 /** The live pay code (paylink.c) in a white square, or the QR to tweebbo.lol without one. */
 static void pay_qr(float cx, float cy, float side) {
   fill_round(cx-side/2-4, cy-side/2-4, side+8, side+8, 4, color(0xffffff));
   int n = paylink_qr_size();
-  if (!n || paylink_state() != PAY_READY) { text_draw("Create a code", cx, cy-6, 11, color(CL_MUTED), 1); return; }
+  if (!n || paylink_state() != PAY_READY) { text_draw(TR("Create a code"), cx, cy-6, 11, color(CL_MUTED), 1); return; }
   float m = (float)(int)(side / n), o = (side - m * n) / 2;
   for (int y = 0; y < n; y++)
     for (int x = 0; x < n; x++)
@@ -556,7 +564,7 @@ static void pay_qr(float cx, float cy, float side) {
 static void pay_footer(float x, float y, float w, float qx, int kind) {
   PayState st = paylink_state();
   char line[200];
-  if (st == PAY_READY) { int s = paylink_seconds_left(now_ms()); snprintf(line, sizeof line, "Scan to pay %d:%02d", s/60, s%60); }
+  if (st == PAY_READY) { int s = paylink_seconds_left(now_ms()); snprintf(line, sizeof line, TR("Scan to pay %d:%02d"), s/60, s%60); }
   else snprintf(line, sizeof line, "%s", st == PAY_LOADING ? "Making a code..." : "Phone checkout");
   text_draw(line, qx + 44, y + 128, 11, color(CL_INK), 1);
   const char *hint = st == PAY_PAID ? paylink_message() : st == PAY_ERROR ? paylink_message()
@@ -565,14 +573,14 @@ static void pay_footer(float x, float y, float w, float qx, int kind) {
     : "Choose crypto or PayPal on your phone. Donations also accept custom amounts.";
   client_ui_paragraph(hint, x + 12, y + 150, w - 24, 2, st == PAY_PAID ? CL_ONLINE : st == PAY_ERROR ? CL_RED : CL_MUTED);
   bool busy = st == PAY_LOADING;
-  button(x + 8, y + 188, w - 16, 26, st == PAY_READY ? "Make a new code" : "Pay with my phone", busy || !net_online() ? 0 : PAY_CODE, kind);
+  button(x + 8, y + 188, w - 16, 26, st == PAY_READY ? TR("Make a new code") : TR("Pay with my phone"), busy || !net_online() ? 0 : PAY_CODE, kind);
 }
 /** Chips: bought with a phone through a pay code; on consoles the Casino plays with credits. */
 static void chips_draw(float x, float y, float w) {
   float tx = x + 12, tw = w - 118, qx = x + w - 100, ty = y + 32;
   char text[200];
   ty += para("Chips are the Casino's real-money currency (18+). Buy them for this character; they play at tweebbo.lol.", tx, ty, tw, 5, CL_INK) + 4;
-  snprintf(text, sizeof text, "On %s the Casino plays with free credits.", show_platform());
+  snprintf(text, sizeof text, TR("On %s the Casino plays with free credits."), show_platform());
   para(text, tx, ty, tw, 2, CL_MUTED);
   pay_qr(qx + 44, y + 74, 80);
   pay_footer(x, y, w, qx, 1);
@@ -582,7 +590,7 @@ static void support_draw(float x, float y, float w) {
   float tx = x + 12, tw = w - 118, qx = x + w - 100, ty = y + 30;
   Ent *me = world_ent(W.me);
   bool member = me && (me->flags & FLAG_CLUB);
-  label(member ? "You are a Club member. Thank you!" : "Keep the hotel open", tx, ty, tw, member ? CL_ONLINE : 0x6b4a00); ty += 18;
+  label(member ? TR("You are a Club member. Thank you!") : TR("Keep the hotel open"), tx, ty, tw, member ? CL_ONLINE : 0x6b4a00); ty += 18;
   ty += para("Donate $5.00 or more for these benefits:", tx, ty, tw, 2, CL_INK);
   static const char *perks[] = {"- Tweebbo Club for life", "- VIP badge", "- 100 credits for hanging out", "- 10,000 credits the first time"};
   for (int i = 0; i < 4; i++) ty += para(perks[i], tx, ty, tw, 1, CL_INK);
@@ -591,7 +599,7 @@ static void support_draw(float x, float y, float w) {
 }
 static void changed(void) { U.count = 0; U.focus = 0; }
 static void arrow_page(float x,float y,float w,int pages) {
-  char s[32];snprintf(s,sizeof s,"Page %d / %d",U.page+1,pages);
+  char s[32];snprintf(s,sizeof s,TR("Page %d / %d"),U.page+1,pages);
   client_ui_arrow(x,y,22,18,"<",pages>1?PAGE:0,-1);
   text_draw(s,x+60,y+3,10,color(CL_MUTED),1);
   client_ui_arrow(x+98,y,22,18,">",pages>1?PAGE:0,1);
@@ -685,10 +693,24 @@ static void offline_rooms(void) {
     Room *room=&U.rooms[U.room_n++];
     copy(room->slug,sizeof room->slug,OFFLINE_ROOMS[i].slug);
     copy(room->title,sizeof room->title,OFFLINE_ROOMS[i].title);
-    room->online=0;room->locked=false;room->owner[0]=0;room->credits=!strcmp(room->slug,"casino");room->featured=room->credits||!strcmp(room->slug,"afterhours")||!strcmp(room->slug,"lobby");
-    room->priority=!strcmp(room->slug,"lobby")?10:room->credits?20:!strcmp(room->slug,"afterhours")?25:2147483647;
+    room->official=true;room->online=0;room->locked=false;room->owner[0]=0;room->credits=!strcmp(room->slug,"casino");room->featured=room->credits||!strcmp(room->slug,"afterhours")||!strcmp(room->slug,tw_reception_slug());
+    room->priority=!strcmp(room->slug,tw_reception_slug())?10:room->credits?20:!strcmp(room->slug,"afterhours")?25:2147483647;
     copy(room->icon,sizeof room->icon,!strcmp(room->slug,"casino")?"credits_icon":!strcmp(room->slug,"afterhours")?"bar_cigar_icon":"building_icon");
     copy(room->label,sizeof room->label,"Practice with bots");
+  }
+  for (const GameRoomPort *p = game_room_ports; p->model && U.room_n < COUNT(U.rooms); p++) {
+    for (int i = 0; i < room_model_count; i++) {
+      if (strcmp(room_models[i].key, p->model)) continue;
+      Room *room = &U.rooms[U.room_n++];
+      memset(room, 0, sizeof *room);
+      copy(room->slug, sizeof room->slug, p->slug);
+      copy(room->title, sizeof room->title, room_models[i].name);
+      room->official = true;
+      room->priority = 2147483647;
+      copy(room->icon, sizeof room->icon, "building_icon");
+      copy(room->label, sizeof room->label, "Practice with bots");
+      break;
+    }
   }
   qsort(U.rooms,U.room_n,sizeof U.rooms[0],room_order);
   filter_rooms();
@@ -703,6 +725,8 @@ static void refresh(void) {
   if (!U.job) copy(U.error, sizeof U.error, "Could not request rooms. Try Refresh.");
 }
 static void open_panel(int panel) {
+  if(panel!=FASTFOOD&&fastfood_active())fastfood_close();
+  if(panel!=BATTLE&&battle_active())battle_close();
   if(U.panel==IDENTITY && panel!=KEYBOARD)client_identity_close();
   if(panel==IDENTITY && U.panel!=KEYBOARD)client_identity_open(W.guest_id);
   if(panel!=LOCK_CONFIRM)memset(U.room_password,0,sizeof U.room_password);
@@ -717,6 +741,8 @@ static void open_panel(int panel) {
     }
   }
   if(panel==SNOW)client_snow_open();
+  if(panel==FASTFOOD){client_snow_reset();Ent *me=world_ent(W.me);fastfood_open(W.name,me?me->look:0);}
+  if(panel==BATTLE){client_snow_reset();battle_panel_reset();battle_open(W.me);}
   if(panel==BAR)client_bar_open();
   client_shop_visible(panel==SHOP);
   if (panel == ROOMS) refresh();
@@ -734,6 +760,9 @@ static void edit_text(int edit) {
   changed();
   U.keyboard_focus = true;
 }
+void client_ui_fastfood(void){open_panel(FASTFOOD);}
+void client_ui_battle(void){open_panel(BATTLE);}
+void client_ui_snow(void){open_panel(SNOW);}
 void client_ui_close(void) {open_panel(CLOSED);}
 void client_ui_alert(const char *text) {
   if(!text || strlen(text)>8192)return;
@@ -832,12 +861,14 @@ static void activate(int cmd, int arg) {
   if(cmd==ALERT_CLOSE){U.alert=false;changed();return;}
   if(net_state()==NET_REPLACED && cmd!=RESUME)return;
   if(cmd==RESUME)U.alert=false;
+  if(cmd>=16000){client_battle_action(cmd,arg);return;}
+  if(cmd>=15000){client_fastfood_action(cmd,arg);return;}
   if(cmd>=14000){if(cmd==14000)doorbell_ring();else if(cmd==14001)doorbell_answer(arg!=0);else if(cmd==14002)doorbell_set(!doorbell.enabled);changed();return;}
   if(cmd>=13000) {
     if(feedback.busy)return;
     if(cmd==13000){feedback.category=arg;feedback.status[0]=0;}
-    else if(cmd==13001){client_ui_edit("Subject (3-100 characters)",feedback.subject,feedback_subject);U.input_cap=401;}
-    else if(cmd==13002){client_ui_edit("Description (10-2000 characters)",feedback.message,feedback_message);U.input_cap=8001;}
+    else if(cmd==13001){client_ui_edit(TR("Subject (3-100 characters)"),feedback.subject,feedback_subject);U.input_cap=401;}
+    else if(cmd==13002){client_ui_edit(TR("Description (10-2000 characters)"),feedback.message,feedback_message);U.input_cap=8001;}
     else if(cmd==13003)feedback_send();
     changed();return;
   }
@@ -896,6 +927,7 @@ static void activate(int cmd, int arg) {
       break;
     }
     case OPEN: open_panel(arg); break;
+    case CHOOSE_LANGUAGE: tw_language_request(arg);break;
     case UPDATE_LATER: update_dismiss(); open_panel(CLOSED); break;
     case UPDATE_INSTALL: update_start(); break;
     case UPDATE_CHECK: update_check(); break;
@@ -997,7 +1029,7 @@ static void activate(int cmd, int arg) {
     case SUBMIT: submit(); break;
     case OFFLINE: open_panel(CLOSED); show_action(SHOW_OFFLINE); break;
     case RESUME: net_resume(); open_panel(CLOSED); break;
-    case LOBBY: net_goto("lobby", ""); open_panel(CLOSED); break;
+    case LOBBY: net_goto(tw_reception_slug(), ""); open_panel(CLOSED); break;
   }
 }
 /** Navigator rows that fit the window (two-line rows on the Switch, one line on the Vita). */
@@ -1028,7 +1060,7 @@ static void navigator(float x,float y,float w,float h) {
   bool offline=net_state()==NET_OFFLINE,tall=SCREEN_H>=340;
   char line[384];
   float ix=x+10,iw=w-20,ty=y+26;
-  if(offline) label("Offline practice: public rooms with bots",ix,ty+4,iw,CL_MUTED);
+  if(offline) label(TR("Offline practice: public rooms with bots"),ix,ty+4,iw,CL_MUTED);
   else {
     static const char *tabs[]={"All Rooms","Public Rooms","My Rooms"};
     float tw=(iw-4)/3;
@@ -1036,15 +1068,15 @@ static void navigator(float x,float y,float w,float h) {
   }
   fill_rect(ix,ty+24,iw,1,color(CL_EDGE));
   float sy=ty+30;
-  field(ix,sy,iw-(offline?64:150),22,U.query,"Find a room",SEARCH,0);
-  button(ix+iw-(offline?60:146),sy,60,22,"Clear",*U.query?CLEAR_SEARCH:0,0);
-  if(!offline){button(ix+iw-82,sy,82,22,"Create",!U.job&&U.model_n&&net_online()?OPEN:0,NEW_ROOM);}
+  field(ix,sy,iw-(offline?64:150),22,U.query,TR("Find a room"),SEARCH,0);
+  button(ix+iw-(offline?60:146),sy,60,22,TR("Clear"),*U.query?CLEAR_SEARCH:0,0);
+  if(!offline){button(ix+iw-82,sy,82,22,TR("Create"),!U.job&&U.model_n&&net_online()?OPEN:0,NEW_ROOM);}
   float ly=sy+28,rh=room_row_h();int per=rooms_per_page();
   float lh=per*rh;
   fill_round(ix,ly-1,iw,lh+2,3,color(0xaaaaaa));fill_rect(ix+1,ly,iw-2,lh,color(0xffffff));
-  if(U.job) label("Loading rooms...",ix+8,ly+6,iw-16,CL_MUTED);
+  if(U.job) label(TR("Loading rooms..."),ix+8,ly+6,iw-16,CL_MUTED);
   else if(U.error[0]) label(U.error,ix+8,ly+6,iw-16,CL_MUTED);
-  else if(!U.visible_n) label(*U.query?"No matches. Clear or change the search.":U.scope==2?"You have no rooms yet. Choose Create.":"No rooms here.",ix+8,ly+6,iw-16,CL_MUTED);
+  else if(!U.visible_n) label(*U.query?TR("No matches. Clear or change the search."):U.scope==2?TR("You have no rooms yet. Choose Create."):TR("No rooms here."),ix+8,ly+6,iw-16,CL_MUTED);
   int pages=(U.visible_n+per-1)/per;if(pages<1)pages=1;if(U.page>=pages)U.page=pages-1;
   for(int i=0;i<per && U.page*per+i<U.visible_n;i++) {
     int index=U.visible[U.page*per+i];Room *r=&U.rooms[index];
@@ -1061,24 +1093,24 @@ static void navigator(float x,float y,float w,float h) {
     if(r->locked) ui_icon_fit("door_password@18",icx,icy,18);
     else if(r->icon[0] && !ui_icon_fit(icon,icx,icy,18)) ui_icon_fit(r->icon,icx,icy,18);
     else if(!r->icon[0]) { fill_round(icx-6,icy-6,12,12,2,color(0x9fb5bd));fill_rect(icx-3,icy-3,6,6,color(0xffffff)); }
-    copy(line,sizeof line,r->title);text_fit(line,tall?12:11,iw-(offline?50:96));
+    copy(line,sizeof line,r->official?TR(r->title):r->title);text_fit(line,tall?12:11,iw-(offline?50:96));
     if(tall) {
       text_draw(line,ix+30,ry+2,12,color(CL_INK),0);
-      if(r->featured && r->label[0]) snprintf(line,sizeof line,"Featured / %s",r->label);
-      else if(r->owner[0]) snprintf(line,sizeof line,"by %s%s",r->owner,r->locked?" / password":"");
+      if(r->featured && r->label[0]) snprintf(line,sizeof line,TR("Featured / %s"),TR(r->label));
+      else if(r->owner[0]) snprintf(line,sizeof line,TR("by %s%s"),r->owner,r->locked?" / password":"");
       else line[0]=0;
       text_fit(line,10,iw-110);text_draw(line,ix+30,ry+16,10,color(CL_MUTED),0);
     } else text_draw(line,ix+30,ry+4,11,color(CL_INK),0);
     if(!offline) occupancy(ix+iw-34,ry+(rh-12)/2,r->online);
     // The classic "Go" capsule.
     fill_round(ix+iw-30,ry+(rh-16)/2,24,16,3,color(focused?CL_EDGE:0x666666));
-    text_draw("Go",ix+iw-18,ry+(rh-16)/2+2,10,color(0xffffff),1);
+    text_draw(TR("Go"),ix+iw-18,ry+(rh-16)/2+2,10,color(0xffffff),1);
   }
   float fy=ly+lh+6;
   arrow_page(ix,fy,iw,pages);
-  if(!offline) button(ix+iw-74,fy-1,74,20,"Refresh",U.job?0:REFRESH,0);
+  if(!offline) button(ix+iw-74,fy-1,74,20,TR("Refresh"),U.job?0:REFRESH,0);
 }
-void client_ui_init(void) { audio_init();char muted[8];if(store_load("audio-muted",muted,sizeof muted))audio_mute(!strcmp(muted,"1")); memset(&U,0,sizeof U);client_shop_reset();client_social_reset();client_games_reset();client_pets_reset();client_trade_reset(); copy(U.server,sizeof U.server,net_server()); }
+void client_ui_init(void) { tw_language_init();audio_init();char muted[8];if(store_load("audio-muted",muted,sizeof muted))audio_mute(!strcmp(muted,"1")); memset(&U,0,sizeof U);client_shop_reset();client_social_reset();client_games_reset();client_pets_reset();client_trade_reset(); copy(U.server,sizeof U.server,net_server()); }
 void client_ui_set_tv(bool enabled) {
   enabled = enabled && SCREEN_W >= 640 && SCREEN_H >= 320;
   if (U.tv == enabled) return;
@@ -1105,6 +1137,8 @@ float client_ui_room_left(void) {
 void client_ui_reset(void) {
   pool_room_changed();client_bar_reset();client_identity_reset();client_music_reset();
   client_snow_reset();
+  fastfood_close();
+  battle_close();
   client_casino_reset();
   client_trade_reset();
   client_shop_reset();
@@ -1122,6 +1156,8 @@ void client_ui_room(void) {
   pool_room_changed();client_bar_reset();client_identity_reset();client_music_reset();
   if(U.panel==POOL||U.panel==BAR)open_panel(CLOSED);
   client_snow_reset();
+  if(U.panel==FASTFOOD){fastfood_close();open_panel(CLOSED);}
+  if(U.panel==BATTLE){battle_close();open_panel(CLOSED);}
   if(U.panel==SNOW || (U.panel==KEYBOARD && U.return_panel==SNOW))open_panel(CLOSED);
   client_casino_reset();
   if(U.panel==CASINO)open_panel(CLOSED);
@@ -1159,6 +1195,7 @@ void client_ui_chat(u32 eid,const char *text) {
 }
 void client_ui_edit_secret(const char *title,bool (*submit)(const char *)){client_ui_edit(title,"",submit);U.secret=true;}
 void client_ui_update(void) {
+  tw_language_update();
   feedback_poll();doorbell_poll();
   static u32 last_bell;
   if(!doorbell.count)last_bell=0;
@@ -1185,6 +1222,8 @@ void client_ui_update(void) {
   client_trade_update(U.panel==TRADE);
   client_casino_update();
   client_snow_update();
+  fastfood_update(now_ms());
+  battle_update(now_ms());
   pool_poll(now_ms());client_bar_update();
   static int previous_pool_mode;
   int activity_mode=pool_mode();
@@ -1252,13 +1291,14 @@ void client_ui_update(void) {
       if (U.room_n==COUNT(U.rooms)) break;
       const char *lang=json_string_value(json_object_get(json_object_get(v,"featured"),"lang"));
       Room *room=&U.rooms[U.room_n++];
+      room->official=json_is_true(json_object_get(v,"public"))&&json_integer_value(json_object_get(v,"ownerId"))==0;
       copy(room->slug,sizeof room->slug,slug); copy(room->title,sizeof room->title,title);
       room->online=(int)json_integer_value(json_object_get(v,"online"));
       room->locked=json_is_true(json_object_get(v,"locked"));
       const char *owner=json_string_value(json_object_get(v,"owner"));
       copy(room->owner,sizeof room->owner,owner?owner:"");
       json_t *feat=json_object_get(v,"featured");
-      room->featured=json_is_true(json_object_get(v,"public")) && json_integer_value(json_object_get(v,"ownerId"))==0 && json_is_object(feat) && (!lang || !strcmp(lang,"en"));
+      room->featured=json_is_true(json_object_get(v,"public")) && json_integer_value(json_object_get(v,"ownerId"))==0 && json_is_object(feat) && (!lang || !strcmp(lang,tw_reception_language()));
       room->priority=room->featured?(int)json_integer_value(json_object_get(feat,"order")):2147483647;
       const char *fl=json_string_value(json_object_get(feat,"label")),*fi=json_string_value(json_object_get(feat,"icon")),*fa=json_string_value(json_object_get(feat,"accent"));
       copy(room->label,sizeof room->label,room->featured && fl?fl:"");copy(room->icon,sizeof room->icon,room->featured && fi?fi:"");
@@ -1286,7 +1326,7 @@ static void keyboard(float x,float y,float w) {
   /* Keep the insertion end visible on a small screen. */
   char *tail=shown;
   while (*tail && text_width(tail,12)>w-24) { tail++; while(((unsigned char)*tail&0xc0)==0x80)tail++; }
-  fill_rect(x+8,y+28,w-16,23,color(0xffffff)); label(*tail ? tail : "Type here",x+12,y+32,w-24,0x18272a);
+  fill_rect(x+8,y+28,w-16,23,color(0xffffff)); label(*tail ? tail : TR("Type here"),x+12,y+32,w-24,0x18272a);
   float kw=(w-16)/10;
   for(int row=0;row<5;row++) {
     const char *s=key_row(row); int col=0;
@@ -1297,11 +1337,11 @@ static void keyboard(float x,float y,float w) {
       s+=n;col++;
     }
   }
-  button(x+8,y+180,54,24,U.shift?"abc":"ABC",SHIFT,0);
-  button(x+66,y+180,54,24,"Space",SPACE,0);
-  button(x+124,y+180,54,24,"Delete",BACKSPACE,0);
-  button(x+182,y+180,54,24,U.symbols?"Letters":"#+=",SYMBOLS,0);
-  button(x+240,y+180,w-248,24,U.edit==EDIT_CHAT?"Send":"Save",SUBMIT,0);
+  button(x+8,y+180,54,24,U.shift?TR("abc"):TR("ABC"),SHIFT,0);
+  button(x+66,y+180,54,24,TR("Space"),SPACE,0);
+  button(x+124,y+180,54,24,TR("Delete"),BACKSPACE,0);
+  button(x+182,y+180,54,24,U.symbols?TR("Letters"):"#+=",SYMBOLS,0);
+  button(x+240,y+180,w-248,24,U.edit==EDIT_CHAT?TR("Send"):TR("Save"),SUBMIT,0);
 }
 
 void client_ui_draw(void) {
@@ -1310,7 +1350,7 @@ void client_ui_draw(void) {
     float w=300,x=(SCREEN_W-w)/2,y=(SCREEN_H-150)/2;
     client_ui_window(x,y,w,150,"Tweebbo");
     client_ui_paragraph(net_status(),x+12,y+34,w-24,4,CL_INK);
-    button(x+50,y+110,w-100,26,"Play here",RESUME,0);
+    button(x+50,y+110,w-100,26,TR("Play here"),RESUME,0);
     U.focus=0;
     return;
   }
@@ -1318,12 +1358,14 @@ void client_ui_draw(void) {
     float w=310,x=(SCREEN_W-w)/2,y=(SCREEN_H-224)/2;
     client_ui_window(x,y,w,224,U.alert_title);
     client_ui_paragraph(U.alert_message,x+12,y+34,w-24,10,CL_INK);
-    button(x+55,y+184,w-110,26,"OK",ALERT_CLOSE,0);
+    button(x+55,y+184,w-110,26,TR("OK"),ALERT_CLOSE,0);
     U.focus=0;
     return;
   }
   if(U.panel==POOL&&pool_mode()==1){pool_draw_booth();return;}
   if(U.panel==POOL&&(pool_mode()==2||pool_mode()==4)){pool_draw_hud();return;}
+  if(U.panel==FASTFOOD && client_fastfood_playing()){client_fastfood_hud();return;}
+  if(U.panel==BATTLE && battle_playing()){client_battle_hud();return;}
   if(U.panel==SNOW && client_snow_playing()){client_snow_hud();return;}
   float margin=U.tv?16:0, bar=SCREEN_H-32-margin;
   // Windows that put their pad legend on the bottom strip get a glass band; the room and
@@ -1345,11 +1387,11 @@ void client_ui_draw(void) {
     if(kind>=0)button(margin+8,bar-28,302,24,context,ACTIVITY_CONTEXT,kind);
     classic_tools(margin,bar);
     if (!W.in_room) {
-      button(SCREEN_W/2-130,SCREEN_H/2+72,124,24,"Rooms",OPEN,ROOMS);
-      button(SCREEN_W/2+6,SCREEN_H/2+72,124,24,"Help",OPEN,HELP);
+      button(SCREEN_W/2-130,SCREEN_H/2+72,124,24,TR("Rooms"),OPEN,ROOMS);
+      button(SCREEN_W/2+6,SCREEN_H/2+72,124,24,TR("Help"),OPEN,HELP);
       if(net_state()==NET_LOCKED){
-        if(net_doorbell()){button(SCREEN_W/2-90,SCREEN_H/2-2,180,24,doorbell.waiting?"Waiting...":"Ring doorbell",doorbell.busy||doorbell.waiting?0:14000,0);client_ui_paragraph(doorbell.status,SCREEN_W/2-150,SCREEN_H/2+28,300,2,0x26373a);}
-        else button(SCREEN_W/2-90,SCREEN_H/2-2,180,24,"Enter password",WRITE,EDIT_PASSWORD);
+        if(net_doorbell()){button(SCREEN_W/2-90,SCREEN_H/2-2,180,24,doorbell.waiting?TR("Waiting..."):TR("Ring doorbell"),doorbell.busy||doorbell.waiting?0:14000,0);client_ui_paragraph(doorbell.status,SCREEN_W/2-150,SCREEN_H/2+28,300,2,0x26373a);}
+        else button(SCREEN_W/2-90,SCREEN_H/2-2,180,24,TR("Enter password"),WRITE,EDIT_PASSWORD);
       }
     }
     return;
@@ -1358,58 +1400,66 @@ void client_ui_draw(void) {
   static const char *titles[]={"","Navigator","Chat","My character","Change looks","Help","Write","Create a room","People in this room","Player","Confirm room action","Room access","Hotel","Furniture","Friends Console","Games","Pets","Room settings","Confirm room access","Safe Trading","Character actions","Casino","Snow Storm","Lido activities","After Hours Bar","Badges & identity","Music & sound","Buy chips",DONATE_LABEL,"Tweebbo update"};
   static const char *edit_titles[]={"Write a message","Change name","Room password","Find a room","Room name","","New room password","Rename room"};
   char title_buf[384]; const char *title;
-  if (U.panel==KEYBOARD) title = U.edit==EDIT_FEATURE?U.edit_title:edit_titles[U.edit];
-  else if (U.panel==CASINO) { snprintf(title_buf,sizeof title_buf,"%s / %u credits",client_casino_title(),W.credits); title=title_buf; }
+  if (U.panel==KEYBOARD) title = U.edit==EDIT_FEATURE?U.edit_title:TR(edit_titles[U.edit]);
+  else if (U.panel==CASINO) { snprintf(title_buf,sizeof title_buf,TR("%s / %u credits"),client_casino_title(),W.credits); title=title_buf; }
   else if (U.panel==SHOP && client_shop_wide()) title = client_shop_title();
   else if (U.panel==DELETE_CONFIRM) title = "Delete room";
+  else if (U.panel==FASTFOOD) title = "Fast Food";
+  else if (U.panel==BATTLE) title = "Battle Ball";
   else if (U.panel==CAMERA) title = "Camera";
   else if (U.panel==FEEDBACK) title = "Suggestion box";
   else if (U.panel==DOORBELL) title = "Doorbell";
-  else title = titles[U.panel];
+  else if(U.panel==LANGUAGE)title=TR("Choose your language");
+  else title = TR(titles[U.panel]);
   window_chrome(x,y,w,h,title,true);
   char line[384];
   if(U.panel==KEYBOARD) keyboard(x,y,w);
+  else if(U.panel==LANGUAGE){
+    for(int i=0;i<TW_LANGUAGE_COUNT;i++)button(x+8+(i%2)*(w-16)/2,y+32+(i/2)*38,(w-24)/2,32,tw_language_name(i),CHOOSE_LANGUAGE,i);
+    label(TR(tw_language_error()),x+8,y+150,w-16,CL_RED);
+    button(x+8,y+188,w-16,26,TR("Back"),OPEN,HELP);
+  }
   else if(U.panel==MORE) {
     static const char *names[]={"People","Catalogue","Inventory","Room furniture","Friends","Games","Pets","Help",DONATE_LABEL};
     static const int commands[]={OPEN,OPEN_SHOP,OPEN_SHOP,OPEN_SHOP,OPEN,OPEN,OPEN,OPEN,OPEN};
     static const int args[]={PEOPLE,SHOP_CATALOGUE,SHOP_INVENTORY,SHOP_ROOM,SOCIAL,GAMES,PETS,HELP,SUPPORT};
-    for(int i=0;i<COUNT(names);i++)button(x+8+(i%2)*148,y+28+(i/2)*34,146,28,names[i],commands[i],args[i]);
-    button(x+8,y+192,146,24,"Snow Storm",OPEN,SNOW);
-    button(x+156,y+192,146,24,"Music / sound",OPEN,MUSIC);
-    if(W.room_owner)button(x+156,y+164,146,28,"Room settings",OPEN,SETTINGS);
+    for(int i=0;i<COUNT(names);i++)button(x+8+(i%2)*148,y+28+(i/2)*34,146,28,TR(names[i]),commands[i],args[i]);
+    button(x+8,y+192,146,24,TR("Snow Storm"),OPEN,SNOW);
+    button(x+156,y+192,146,24,TR("Music / sound"),OPEN,MUSIC);
+    if(W.room_owner)button(x+156,y+164,146,28,TR("Room settings"),OPEN,SETTINGS);
   }
   else if(U.panel==SETTINGS) {
     bool owner=W.room_owner && net_online() && !strcmp(U.settings_room,W.slug);
     label(W.title,x+10,y+32,w-20,0x18272a);
-    label(!owner?"Only the connected owner can change access.":U.job?"Loading room access...":!U.lock_known?"Access status unavailable.":U.locked?"Password required for visitors.":"Open to visitors.",x+10,y+57,w-20,0x26373a);
-    button(x+8,y+81,w-16,26,"Rename room",owner&&!U.job?WRITE:0,EDIT_ROOM_NAME);
-    button(x+8,y+113,w-16,26,"Set / change password",owner&&!U.job?WRITE:0,EDIT_ROOM_PASSWORD);
-    button(x+8,y+145,140,26,"Open room",owner&&!U.job?REMOVE_LOCK:0,0);
-    button(x+156,y+145,146,26,"Doorbell",owner?OPEN:0,DOORBELL);
-    button(x+8,y+177,140,26,"Rights and bans",owner?OPEN:0,RIGHTS);
-    button(x+156,y+177,146,26,"Delete room",owner&&!U.job?OPEN:0,DELETE_CONFIRM);
+    label(!owner?TR("Only the connected owner can change access."):U.job?TR("Loading room access..."):!U.lock_known?TR("Access status unavailable."):U.locked?TR("Password required for visitors."):TR("Open to visitors."),x+10,y+57,w-20,0x26373a);
+    button(x+8,y+81,w-16,26,TR("Rename room"),owner&&!U.job?WRITE:0,EDIT_ROOM_NAME);
+    button(x+8,y+113,w-16,26,TR("Set / change password"),owner&&!U.job?WRITE:0,EDIT_ROOM_PASSWORD);
+    button(x+8,y+145,140,26,TR("Open room"),owner&&!U.job?REMOVE_LOCK:0,0);
+    button(x+156,y+145,146,26,TR("Doorbell"),owner?OPEN:0,DOORBELL);
+    button(x+8,y+177,140,26,TR("Rights and bans"),owner?OPEN:0,RIGHTS);
+    button(x+156,y+177,146,26,TR("Delete room"),owner&&!U.job?OPEN:0,DELETE_CONFIRM);
 
   }
   else if(U.panel==DOORBELL) {
     client_ui_paragraph(doorbell.status,x+10,y+34,w-20,2,0x26373a);
-    button(x+8,y+72,w-16,28,doorbell.enabled?"Turn off doorbell (open room)":"Use doorbell instead of password",!doorbell.busy&&W.room_owner?14002:0,0);
+    button(x+8,y+72,w-16,28,doorbell.enabled?TR("Turn off doorbell (open room)"):TR("Use doorbell instead of password"),!doorbell.busy&&W.room_owner?14002:0,0);
     if(doorbell.guest){
       label(doorbell.name,x+10,y+115,w-20,0x18272a);
-      button(x+8,y+151,140,28,"Let in",!doorbell.busy?14001:0,1);
-      button(x+156,y+151,146,28,"Decline",!doorbell.busy?14001:0,0);
+      button(x+8,y+151,140,28,TR("Let in"),!doorbell.busy?14001:0,1);
+      button(x+156,y+151,146,28,TR("Decline"),!doorbell.busy?14001:0,0);
     }
   }
   else if(U.panel==DELETE_CONFIRM) {
     label(W.title,x+10,y+32,w-20,0x18272a);
-    client_ui_paragraph("Delete this room? Everyone leaves. Furniture and pets return to their owners.",x+10,y+65,w-20,4,0x26373a);
-    button(x+8,y+180,140,26,"Cancel",CLOSE,0);
-    button(x+156,y+180,146,26,"Delete room",!U.job&&W.room_owner&&net_online()?DELETE_ROOM:0,0);
+    client_ui_paragraph(TR("Delete this room? Everyone leaves. Furniture and pets return to their owners."),x+10,y+65,w-20,4,0x26373a);
+    button(x+8,y+180,140,26,TR("Cancel"),CLOSE,0);
+    button(x+156,y+180,146,26,TR("Delete room"),!U.job&&W.room_owner&&net_online()?DELETE_ROOM:0,0);
   }
   else if(U.panel==LOCK_CONFIRM) {
     label(W.title,x+10,y+32,w-20,0x18272a);
-    client_ui_paragraph(*U.room_password?"Require the new password for future visitors?":"Remove the password and open this room to visitors?",x+10,y+65,w-20,3,0x26373a);
-    button(x+8,y+180,140,26,"Cancel",CLOSE,0);
-    button(x+156,y+180,146,26,"Confirm",!U.job&&W.room_owner&&net_online()?SAVE_LOCK:0,0);
+    client_ui_paragraph(*U.room_password?TR("Require the new password for future visitors?"):TR("Remove the password and open this room to visitors?"),x+10,y+65,w-20,3,0x26373a);
+    button(x+8,y+180,140,26,TR("Cancel"),CLOSE,0);
+    button(x+156,y+180,146,26,TR("Confirm"),!U.job&&W.room_owner&&net_online()?SAVE_LOCK:0,0);
   }
   else if(U.panel==SHOP)client_shop_draw(x,y,w,h);
   else if(U.panel==SOCIAL)client_social_draw(x,y,w);
@@ -1418,21 +1468,23 @@ void client_ui_draw(void) {
   else if(U.panel==TRADE)client_trade_draw(x,y,w);
   else if(U.panel==CASINO)client_casino_draw(x,y,w);
   else if(U.panel==SNOW)client_snow_draw(x,y,w);
+  else if(U.panel==FASTFOOD)client_fastfood_draw(x,y,w);
+  else if(U.panel==BATTLE)client_battle_draw(x,y,w);
   else if(U.panel==POOL)pool_draw_panel(x,y,w);
   else if(U.panel==BAR)client_bar_draw(x,y,w);
   else if(U.panel==IDENTITY)client_identity_draw(x,y,w);
   else if(U.panel==MUSIC)client_music_draw(x,y,w);
   else if(U.panel==CAMERA)client_camera_draw(x,y,w,h);
   else if(U.panel==FEEDBACK) {
-    label("Send an idea or report a problem.",x+10,y+29,w-20,0x26373a);
+    label(TR("Send an idea or report a problem."),x+10,y+29,w-20,0x26373a);
     static const char *categories[]={"Suggestion","Bug","Other"};
     for(int i=0;i<3;i++)button(x+10+i*(w-20)/3,y+48,(w-26)/3,23,categories[i],feedback.busy?0:13000,i);
     label(categories[feedback.category],x+10,y+75,w-20,0x26373a);
-    client_ui_field(x+10,y+93,w-20,23,feedback.subject,"Subject (3-100 characters)",feedback.busy?0:13001,0);
-    client_ui_field(x+10,y+122,w-20,23,feedback.message,"Description (10-2000 characters)",feedback.busy?0:13002,0);
-    client_ui_paragraph(feedback.status[0]?feedback.status:"Do not include passwords or private access codes.",x+10,y+151,w-20,2,0x26373a);
-    button(x+10,y+188,100,25,"Close",CLOSE,0);
-    button(x+116,y+188,w-126,25,feedback.busy?"Sending...":"Send message",feedback.busy?0:13003,0);
+    client_ui_field(x+10,y+93,w-20,23,feedback.subject,TR("Subject (3-100 characters)"),feedback.busy?0:13001,0);
+    client_ui_field(x+10,y+122,w-20,23,feedback.message,TR("Description (10-2000 characters)"),feedback.busy?0:13002,0);
+    client_ui_paragraph(feedback.status[0]?feedback.status:TR("Do not include passwords or private access codes."),x+10,y+151,w-20,2,0x26373a);
+    button(x+10,y+188,100,25,TR("Close"),CLOSE,0);
+    button(x+116,y+188,w-126,25,feedback.busy?TR("Sending..."):TR("Send message"),feedback.busy?0:13003,0);
   }
   else if(U.panel==CHIPS)chips_draw(x,y,w);
   else if(U.panel==SUPPORT)support_draw(x,y,w);
@@ -1441,47 +1493,47 @@ void client_ui_draw(void) {
     Ent *me=world_ent(W.me);bool enabled=me && ready();
     bool lying=me && (me->flags&FLAG_LAY);
     float third=(w-24)/3,half=(w-20)/2;
-    button(x+8,y+28,third,24,"Wave",enabled&&!lying?GESTURE:0,GESTURE_WAVE);
-    button(x+12+third,y+28,third,24,me&&(me->flags&FLAG_DANCE)?"Stop dance":"Dance",enabled&&!lying?GESTURE:0,GESTURE_DANCE);
-    button(x+16+2*third,y+28,third,24,me&&(me->flags&(FLAG_SIT|FLAG_LAY))?"Stand up":"Sit",enabled?GESTURE:0,GESTURE_SIT);
+    button(x+8,y+28,third,24,TR("Wave"),enabled&&!lying?GESTURE:0,GESTURE_WAVE);
+    button(x+12+third,y+28,third,24,me&&(me->flags&FLAG_DANCE)?TR("Stop dance"):TR("Dance"),enabled&&!lying?GESTURE:0,GESTURE_DANCE);
+    button(x+16+2*third,y+28,third,24,me&&(me->flags&(FLAG_SIT|FLAG_LAY))?TR("Stand up"):TR("Sit"),enabled?GESTURE:0,GESTURE_SIT);
     static const char *expr[]={"Kiss","Laugh","Thumb up","Sign","Sleep"};
     static const int kinds[]={GESTURE_KISS,GESTURE_LAUGH,GESTURE_THUMB,GESTURE_SIGN,GESTURE_SLEEP};
-    label("Expressions",x+10,y+56,w-20,CL_MUTED);
+    label(TR("Expressions"),x+10,y+56,w-20,CL_MUTED);
     for(int i=0;i<5;i++)button(x+8+(i%3)*(third+4),y+72+(i/3)*28,third,24,expr[i],enabled&&(!lying||kinds[i]==GESTURE_SLEEP)?GESTURE:0,kinds[i]);
-    if(!lying && me && me->action!=6)button(x+16+2*third,y+100,third,24,"Stop",enabled?GESTURE:0,GESTURE_STOP);
-    label("Dance style",x+10,y+128,w-20,CL_MUTED);
+    if(!lying && me && me->action!=6)button(x+16+2*third,y+100,third,24,TR("Stop"),enabled?GESTURE:0,GESTURE_STOP);
+    label(TR("Dance style"),x+10,y+128,w-20,CL_MUTED);
     static const char *styles[]={"Hab-Hop","Pogo Mogo","Duck Funk","The Rollie"};
     for(int i=0;i<4;i++)button(x+8+(i%2)*(half+4),y+144+(i/2)*26,half,22,styles[i],enabled&&!lying?GESTURE:0,GESTURE_DANCE_STYLE+i);
-    button(x+8,y+197,w-16,20,"Put drink away",enabled&&me->drink?PUT_DRINK_AWAY:0,0);
+    button(x+8,y+197,w-16,20,TR("Put drink away"),enabled&&me->drink?PUT_DRINK_AWAY:0,0);
   }
   else if(U.panel==ROOMS) {
     navigator(x,y,w,h);
   } else if(U.panel==NEW_ROOM) {
-    label("Name (3 to 40 characters)",x+10,y+32,w-20,0x26373a);
-    field(x+8,y+52,w-16,26,U.title,"Enter a room name",U.job?0:WRITE,EDIT_TITLE);
-    label("Layout",x+10,y+88,w-20,0x26373a);
-    label(U.model_n?U.models[U.model].name:"Load the Navigator first.",x+10,y+109,w-20,0x18272a);
-    button(x+8,y+134,140,25,"Previous",!U.job&&U.model_n?MODEL:0,-1);
-    button(x+156,y+134,146,25,"Next",!U.job&&U.model_n?MODEL:0,1);
-    button(x+8,y+188,100,26,"Back",CLOSE,0);
-    button(x+164,y+188,138,26,U.job?"Creating...":"Create and enter",!U.job&&U.model_n?CREATE_ROOM:0,0);
+    label(TR("Name (3 to 40 characters)"),x+10,y+32,w-20,0x26373a);
+    field(x+8,y+52,w-16,26,U.title,TR("Enter a room name"),U.job?0:WRITE,EDIT_TITLE);
+    label(TR("Layout"),x+10,y+88,w-20,0x26373a);
+    label(U.model_n?U.models[U.model].name:TR("Load the Navigator first."),x+10,y+109,w-20,0x18272a);
+    button(x+8,y+134,140,25,TR("Previous"),!U.job&&U.model_n?MODEL:0,-1);
+    button(x+156,y+134,146,25,TR("Next"),!U.job&&U.model_n?MODEL:0,1);
+    button(x+8,y+188,100,26,TR("Back"),CLOSE,0);
+    button(x+164,y+188,138,26,U.job?TR("Creating..."):TR("Create and enter"),!U.job&&U.model_n?CREATE_ROOM:0,0);
   } else if(U.panel==RIGHTS) {
     json_t *j=W.rights_json?json_loads(W.rights_json,0,NULL):NULL;
     json_t *holders=json_object_get(j,"holders"),*bans=json_object_get(j,"bans");
     int nh=(int)json_array_size(holders),nb=(int)json_array_size(bans),n=nh+nb;
-    if(!W.room_owner)label("Open your own room to manage access.",x+10,y+36,w-20,0x26373a);
+    if(!W.room_owner)label(TR("Open your own room to manage access."),x+10,y+36,w-20,0x26373a);
     else {
       int pages=(n+4)/5;if(!pages)pages=1;if(U.rights_page>=pages)U.rights_page=pages-1;
-      if(!n)label("No other rights holders or banned players.",x+10,y+36,w-20,0x26373a);
+      if(!n)label(TR("No other rights holders or banned players."),x+10,y+36,w-20,0x26373a);
       for(int row=0;row<5 && U.rights_page*5+row<n;row++) {
         int index=U.rights_page*5+row;
         json_t *v=json_array_get(index<nh?holders:bans,index<nh?index:index-nh);
         const char *name=json_string_value(json_object_get(v,"name"));
-        label(name?name:"Player",x+10,y+35+row*29,184,0x18272a);
-        button(x+198,y+30+row*29,104,26,index<nh?"Remove rights":"Lift ban",index<nh?REVOKE:UNBAN,(int)json_integer_value(json_object_get(v,"guest")));
+        label(name?name:TR("Player"),x+10,y+35+row*29,184,0x18272a);
+        button(x+198,y+30+row*29,104,26,index<nh?TR("Remove rights"):TR("Lift ban"),index<nh?REVOKE:UNBAN,(int)json_integer_value(json_object_get(v,"guest")));
       }
-      button(x+8,y+188,88,26,"Previous",U.rights_page?PAGE:0,-1);
-      button(x+214,y+188,88,26,"Next",U.rights_page+1<pages?PAGE:0,1);
+      button(x+8,y+188,88,26,TR("Previous"),U.rights_page?PAGE:0,-1);
+      button(x+214,y+188,88,26,TR("Next"),U.rights_page+1<pages?PAGE:0,1);
     }
     json_decref(j);
   } else if(U.panel==PEOPLE) {
@@ -1494,72 +1546,72 @@ void client_ui_draw(void) {
       snprintf(line,sizeof line,"%s%s",e->name,e->id==W.me?" (you)":e->guest==W.owner?" (owner)":"");
       button(x+8,y+30+row*29,w-16,26,line,SELECT_PERSON,(int)e->id);
     }
-    if(!count)label("Join a room to see its players.",x+10,y+36,w-20,0x26373a);
-    button(x+8,y+188,88,26,"Previous",U.people_page?PAGE:0,-1);
-    button(x+102,y+188,106,26,"Trading",OPEN,TRADE);
-    button(x+214,y+188,88,26,"Next",U.people_page+1<pages?PAGE:0,1);
+    if(!count)label(TR("Join a room to see its players."),x+10,y+36,w-20,0x26373a);
+    button(x+8,y+188,88,26,TR("Previous"),U.people_page?PAGE:0,-1);
+    button(x+102,y+188,106,26,TR("Trading"),OPEN,TRADE);
+    button(x+214,y+188,88,26,TR("Next"),U.people_page+1<pages?PAGE:0,1);
   } else if(U.panel==PERSON || U.panel==CONFIRM) {
     Ent *e=world_ent(U.person);
-    if(!e)label("This player has left the room.",x+10,y+36,w-20,0x26373a);
+    if(!e)label(TR("This player has left the room."),x+10,y+36,w-20,0x26373a);
     else {
       label(e->name,x+10,y+30,w-20,0x18272a);
       if(U.panel==CONFIRM) {
         const char *action=U.mod==MOD_KICK?"Remove this player from the room?":U.mod==MOD_BAN?"Ban this player for one hour?":U.mod==MOD_GIVE_RIGHTS?"Allow this player to arrange furniture?":"Remove this player's room rights?";
         label(action,x+10,y+68,w-20,0x18272a);
-        button(x+8,y+170,140,26,"Cancel",CLOSE,0);button(x+156,y+170,146,26,"Confirm",CONFIRM_MOD,0);
+        button(x+8,y+170,140,26,TR("Cancel"),CLOSE,0);button(x+156,y+170,146,26,TR("Confirm"),CONFIRM_MOD,0);
       } else {
         avatar_draw(e->look,2,POSE_STD,0,0,2,0,false,x+12,y+50,1,255);
         if(e->device) {
           const char *system=e->device==3?"PlayStation Vita":e->device==2?"Nintendo Switch":"Nintendo 3DS";
           char note[128];
-          snprintf(note,sizeof note,e->id==W.me?"You are connected through a %s system.":"This person is connected through a %s system.",system);
+          snprintf(note,sizeof note,e->id==W.me?TR("You are connected through a %s system."):TR("This person is connected through a %s system."),system);
           show_device_badge(e->device,x+90,y+54,1.0f);
           client_ui_paragraph(note,x+108,y+50,w-118,2,0x26373a);
-        } else label(e->guest>=4000000000u?"Hotel staff":"Web / other client",x+90,y+54,w-100,0x26373a);
+        } else label(e->guest>=4000000000u?TR("Hotel staff"):TR("Web / other client"),x+90,y+54,w-100,0x26373a);
         bool receptionist=feedback_receptionist(e->guest,W.model);
         if(receptionist) {
-          label("Receptionist",x+90,y+82,w-100,0x26373a);
-          client_ui_paragraph("Have an idea or found a problem? Leave a message in the suggestion box.",x+90,y+105,w-100,4,0x26373a);
+          label(TR("Receptionist"),x+90,y+82,w-100,0x26373a);
+          client_ui_paragraph(TR("Have an idea or found a problem? Leave a message in the suggestion box."),x+90,y+105,w-100,4,0x26373a);
         }
         bool other=e->guest<4000000000u && e->id!=W.me && e->guest!=W.owner && ready();
         if(other && W.room_rights) {
-          button(x+90,y+88,100,25,"Kick",MODERATE,MOD_KICK);
-          button(x+196,y+88,106,25,"Ban (1 hour)",MODERATE,MOD_BAN);
+          button(x+90,y+88,100,25,TR("Kick"),MODERATE,MOD_KICK);
+          button(x+196,y+88,106,25,TR("Ban (1 hour)"),MODERATE,MOD_BAN);
         }
         if(other && W.room_owner) {
-          button(x+90,y+118,212,25,"Give room rights",MODERATE,MOD_GIVE_RIGHTS);
-          button(x+90,y+148,212,25,"Remove room rights",MODERATE,MOD_REMOVE_RIGHTS);
+          button(x+90,y+118,212,25,TR("Give room rights"),MODERATE,MOD_GIVE_RIGHTS);
+          button(x+90,y+148,212,25,TR("Remove room rights"),MODERATE,MOD_REMOVE_RIGHTS);
         }
-        button(x+8,y+188,100,26,"Back",CLOSE,0);
-        button(x+116,y+188,186,26,receptionist?"Suggestions":"Trading",OPEN,receptionist?FEEDBACK:TRADE);
+        button(x+8,y+188,100,26,TR("Back"),CLOSE,0);
+        button(x+116,y+188,186,26,receptionist?TR("Suggestions"):TR("Trading"),OPEN,receptionist?FEEDBACK:TRADE);
       }
     }
   } else if(U.panel==CHAT) {
-    if(!U.chat_n) label("Messages will appear here.",x+10,y+32,w-20,0x26373a);
+    if(!U.chat_n) label(TR("Messages will appear here."),x+10,y+32,w-20,0x26373a);
     int end=U.chat_n-U.chat_page*5-U.chat_pending;
     if(end<1)end=1;
     int start=end-5; if(start<0)start=0;
     for(int i=start;i<end;i++) label(U.chat[i],x+10,y+30+(i-start)*27,w-20,0x18272a);
-    button(x+8,y+174,90,24,"Write",WRITE,EDIT_CHAT);
-    if(U.chat_n>5) { button(x+106,y+174,90,24,"Older",PAGE,1); button(x+204,y+174,98,24,"Newer",PAGE,-1); }
+    button(x+8,y+174,90,24,TR("Write"),WRITE,EDIT_CHAT);
+    if(U.chat_n>5) { button(x+106,y+174,90,24,TR("Older"),PAGE,1); button(x+204,y+174,98,24,TR("Newer"),PAGE,-1); }
   } else if(U.panel==ME) {
     Ent *me=world_ent(W.me);
     if(me) avatar_draw(me->look,2,POSE_STD,0,0,2,0,false,x+16,y+26,1,255);
-    label(W.name[0]?W.name:"Waiting for character...",x+94,y+36,w-104,0x18272a);
-    snprintf(line,sizeof line,"%u credits",W.credits); label(line,x+94,y+60,w-104,0x26373a);
-    button(x+94,y+88,180,25,"Change looks",me?OPEN:0,DRESS);
-    button(x+94,y+120,180,25,"Change name",me?RENAME:0,0);
-    button(x+94,y+152,180,25,"Badges / character code",OPEN,IDENTITY);
+    label(W.name[0]?W.name:TR("Waiting for character..."),x+94,y+36,w-104,0x18272a);
+    snprintf(line,sizeof line,TR("%u credits"),W.credits); label(line,x+94,y+60,w-104,0x26373a);
+    button(x+94,y+88,180,25,TR("Change looks"),me?OPEN:0,DRESS);
+    button(x+94,y+120,180,25,TR("Change name"),me?RENAME:0,0);
+    button(x+94,y+152,180,25,TR("Badges / character code"),OPEN,IDENTITY);
     if(!strcmp(W.slug,"afterhours")) {
-      button(x+8,y+188,144,26,"Character actions",OPEN,ACTIONS);
-      button(x+158,y+188,144,26,"Bar",OPEN,BAR);
+      button(x+8,y+188,144,26,TR("Character actions"),OPEN,ACTIONS);
+      button(x+158,y+188,144,26,TR("Bar"),OPEN,BAR);
     } else if(W.room_owner && net_online()) {
-      button(x+8,y+188,w-136,26,"Character actions",OPEN,ACTIONS);
-      button(x+w-124,y+188,116,26,"Room settings",OPEN,SETTINGS);
-    } else button(x+8,y+188,w-16,26,"Character actions",OPEN,ACTIONS);
+      button(x+8,y+188,w-136,26,TR("Character actions"),OPEN,ACTIONS);
+      button(x+w-124,y+188,116,26,TR("Room settings"),OPEN,SETTINGS);
+    } else button(x+8,y+188,w-16,26,TR("Character actions"),OPEN,ACTIONS);
   } else if(U.panel==DRESS) {
     static const char *names[]={"Face","Hair","Top","Legs","Shoes"};
-    for(int i=0;i<5;i++)button(x+8+i*59,y+28,55,23,names[i],CATEGORY,i);
+    for(int i=0;i<5;i++)button(x+8+i*59,y+28,55,23,TR(names[i]),CATEGORY,i);
     Category c=category();
     int selected=wrap(*c.style,c.count),start=(selected/3)*3;
     button(x+8,y+92,30,28,"<",STYLE,-1);button(x+272,y+92,30,28,">",STYLE,1);
@@ -1577,65 +1629,66 @@ void client_ui_draw(void) {
       fill_rect(cx+3,y+168,11,15,color(c.palette[i]));
       if(i==wrap(*c.tint,c.colors))fill_rect(cx+5,y+187,7,2,color(0x18272a));
     }
-    button(x+8,y+192,70,24,"Cancel",CLOSE,0);
+    button(x+8,y+192,70,24,TR("Cancel"),CLOSE,0);
     label(c.items[selected].label,x+84,y+198,124,0x18272a);
-    button(x+214,y+192,88,24,"Save look",SAVE_LOOK,0);
+    button(x+214,y+192,88,24,TR("Save look"),SAVE_LOOK,0);
   } else if(U.panel==HELP) {
 #if TWEEBBO_DEVICE == 3
     float hy=y+30;
-    client_ui_key_hint("Cross","Choose",x+10,hy,CL_INK,CL_INK);
-    client_ui_key_hint("Circle","Close or Rooms",x+146,hy,CL_INK,CL_INK);
+    client_ui_key_hint("Cross",TR("Choose"),x+10,hy,CL_INK,CL_INK);
+    client_ui_key_hint("Circle",TR("Close or Rooms"),x+146,hy,CL_INK,CL_INK);
     hy+=18;
-    client_ui_key_hint("Triangle","Chat",x+10,hy,CL_INK,CL_INK);
-    client_ui_key_hint("Square","Wave",x+146,hy,CL_INK,CL_INK);
+    client_ui_key_hint("Triangle",TR("Chat"),x+10,hy,CL_INK,CL_INK);
+    client_ui_key_hint("Square",TR("Wave"),x+146,hy,CL_INK,CL_INK);
     hy+=18;
-    client_ui_key_hint("L/R","Room zoom",x+10,hy,CL_INK,CL_INK);
-    client_ui_key_hint("D-pad","Move",x+146,hy,CL_INK,CL_INK);
+    client_ui_key_hint("L/R",TR("Room zoom"),x+10,hy,CL_INK,CL_INK);
+    client_ui_key_hint("D-pad",TR("Move"),x+146,hy,CL_INK,CL_INK);
     hy+=18;
-    label("The left stick and touch also work.",x+10,hy,w-20,CL_INK);
+    label(TR("The left stick and touch also work."),x+10,hy,w-20,CL_INK);
 #else
     float hy=y+30;
-    client_ui_key_hint("A","Choose",x+10,hy,CL_INK,CL_INK);
-    client_ui_key_hint("B","Close or Rooms",x+146,hy,CL_INK,CL_INK);
+    client_ui_key_hint("A",TR("Choose"),x+10,hy,CL_INK,CL_INK);
+    client_ui_key_hint("B",TR("Close or Rooms"),x+146,hy,CL_INK,CL_INK);
     hy+=18;
-    client_ui_key_hint("Y","Chat",x+10,hy,CL_INK,CL_INK);
-    client_ui_key_hint("X","Wave",x+146,hy,CL_INK,CL_INK);
+    client_ui_key_hint("Y",TR("Chat"),x+10,hy,CL_INK,CL_INK);
+    client_ui_key_hint("X",TR("Wave"),x+146,hy,CL_INK,CL_INK);
     hy+=18;
-    client_ui_key_hint("L/R","Room zoom",x+10,hy,CL_INK,CL_INK);
-    client_ui_key_hint("D-pad","Move",x+146,hy,CL_INK,CL_INK);
+    client_ui_key_hint("L/R",TR("Room zoom"),x+10,hy,CL_INK,CL_INK);
+    client_ui_key_hint("D-pad",TR("Move"),x+146,hy,CL_INK,CL_INK);
     hy+=18;
-    label(U.tv?"TV mode: every control works with a pad.":"The left stick and touch also work.",x+10,hy,w-20,CL_INK);
+    label(U.tv?TR("TV mode: every control works with a pad."):TR("The left stick and touch also work."),x+10,hy,w-20,CL_INK);
 #endif
-    button(x+8,y+110,w-16,24,net_state()==NET_OFFLINE?RETURN_LABEL:"Play offline",OFFLINE,0);
+    button(x+8,y+110,(w-24)/2,24,net_state()==NET_OFFLINE?TR(RETURN_LABEL):TR("Play offline"),OFFLINE,0);
+    button(x+w/2+4,y+110,(w-24)/2,24,TR("Language"),OPEN,LANGUAGE);
     UpdateState us=update_state();
     char upd[96];
-    if(us==UPD_AVAILABLE)snprintf(upd,sizeof upd,"Install update %s",update_version());
-    else if(us==UPD_CHECKING)snprintf(upd,sizeof upd,"Searching for updates...");
-    else if(us==UPD_DOWNLOADING)snprintf(upd,sizeof upd,"Updating...");
-    else if(us==UPD_INSTALLED)snprintf(upd,sizeof upd,"Finish update");
-    else snprintf(upd,sizeof upd,"Search for updates");
+    if(us==UPD_AVAILABLE)snprintf(upd,sizeof upd,TR("Install update %s"),update_version());
+    else if(us==UPD_CHECKING)snprintf(upd,sizeof upd,"%s",TR("Searching for updates..."));
+    else if(us==UPD_DOWNLOADING)snprintf(upd,sizeof upd,"%s",TR("Updating..."));
+    else if(us==UPD_INSTALLED)snprintf(upd,sizeof upd,"%s",TR("Finish update"));
+    else snprintf(upd,sizeof upd,"%s",TR("Search for updates"));
     button(x+8,y+138,w-16,24,upd,CHECK_UPDATES,0);
     float third=(w-24)/3;
-    button(x+8,y+164,third,24,"Music / sound",OPEN,MUSIC);
+    button(x+8,y+164,third,24,TR("Music / sound"),OPEN,MUSIC);
     button(x+12+third,y+164,third,24,DONATE_LABEL,OPEN,SUPPORT);
-    button(x+16+third*2,y+164,third,24,"Buy chips",OPEN,CHIPS);
-    if(net_state()==NET_REPLACED || net_state()==NET_DENIED)button(x+8,y+192,w-16,24,"Retry connection",RESUME,0);
-    else if(net_state()!=NET_OFFLINE)button(x+8,y+192,w-16,24,"Return to lobby",LOBBY,0);
+    button(x+16+third*2,y+164,third,24,TR("Buy chips"),OPEN,CHIPS);
+    if(net_state()==NET_REPLACED || net_state()==NET_DENIED)button(x+8,y+192,w-16,24,TR("Retry connection"),RESUME,0);
+    else if(net_state()!=NET_OFFLINE)button(x+8,y+192,w-16,24,TR("Return to lobby"),LOBBY,0);
   }
   if(U.status[0])label(U.status,margin+8,bar+8,SCREEN_W-16-margin*2,0xffffff);
   else if(client_shop_building()) {
 #if TWEEBBO_DEVICE == 3
     float hx=margin+8;
-    hx=hint_chip("D-pad","Move",hx,bar+6,0,0);
-    hx=hint_chip("Cross","Place",hx,bar+6,0,0);
-    hx=hint_chip("Circle","Cancel",hx,bar+6,0,0);
-    hint_chip("L/R","Rotate / height",hx,bar+6,0,0);
+    hx=hint_chip("D-pad",TR("Move"),hx,bar+6,0,0);
+    hx=hint_chip("Cross",TR("Place"),hx,bar+6,0,0);
+    hx=hint_chip("Circle",TR("Cancel"),hx,bar+6,0,0);
+    hint_chip("L/R",TR("Rotate / height"),hx,bar+6,0,0);
 #else
     float hx=margin+8;
-    hx=hint_chip("D-pad","Move",hx,bar+6,0,0);
-    hx=hint_chip("A","Place",hx,bar+6,0,0);
-    hx=hint_chip("B","Cancel",hx,bar+6,0,0);
-    hint_chip("L/R","Rotate / height",hx,bar+6,0,0);
+    hx=hint_chip("D-pad",TR("Move"),hx,bar+6,0,0);
+    hx=hint_chip("A",TR("Place"),hx,bar+6,0,0);
+    hx=hint_chip("B",TR("Cancel"),hx,bar+6,0,0);
+    hint_chip("L/R",TR("Rotate / height"),hx,bar+6,0,0);
 #endif
   } else if(U.panel==ROOMS || (U.panel==SHOP && client_shop_wide())) {
     window_hints(margin+8,bar+6,U.panel==ROOMS);
@@ -1644,20 +1697,20 @@ void client_ui_draw(void) {
   } else if(U.panel==KEYBOARD) {
 #if TWEEBBO_DEVICE == 3
     float hx=margin+8;
-    hx=hint_chip("Cross","Type",hx,bar+6,0,0);
-    hx=hint_chip("Circle","Back",hx,bar+6,0,0);
-    hx=hint_chip("Square","Delete",hx,bar+6,0,0);
-    hx=hint_chip("Triangle",U.edit==EDIT_CHAT?"Send":"Save",hx,bar+6,0,0);
-    hx=hint_chip("L","Case",hx,bar+6,0,0);
-    hint_chip("R","Space",hx,bar+6,0,0);
+    hx=hint_chip("Cross",TR("Type"),hx,bar+6,0,0);
+    hx=hint_chip("Circle",TR("Back"),hx,bar+6,0,0);
+    hx=hint_chip("Square",TR("Delete"),hx,bar+6,0,0);
+    hx=hint_chip("Triangle",U.edit==EDIT_CHAT?TR("Send"):TR("Save"),hx,bar+6,0,0);
+    hx=hint_chip("L",TR("Case"),hx,bar+6,0,0);
+    hint_chip("R",TR("Space"),hx,bar+6,0,0);
 #else
     float hx=margin+8;
-    hx=hint_chip("A","Type",hx,bar+6,0,0);
-    hx=hint_chip("B","Back",hx,bar+6,0,0);
-    hx=hint_chip("X","Delete",hx,bar+6,0,0);
-    hx=hint_chip("Y",U.edit==EDIT_CHAT?"Send":"Save",hx,bar+6,0,0);
-    hx=hint_chip("L","Case",hx,bar+6,0,0);
-    hint_chip("R","Space",hx,bar+6,0,0);
+    hx=hint_chip("A",TR("Type"),hx,bar+6,0,0);
+    hx=hint_chip("B",TR("Back"),hx,bar+6,0,0);
+    hx=hint_chip("X",TR("Delete"),hx,bar+6,0,0);
+    hx=hint_chip("Y",U.edit==EDIT_CHAT?TR("Send"):TR("Save"),hx,bar+6,0,0);
+    hx=hint_chip("L",TR("Case"),hx,bar+6,0,0);
+    hint_chip("R",TR("Space"),hx,bar+6,0,0);
 #endif
   }
   if(U.panel==KEYBOARD && U.keyboard_focus) {
@@ -1674,6 +1727,8 @@ bool client_ui_action(int action) {
     activate(PAGE,action==SHOW_L?1:-1); return true;
   }
   if(U.panel==POOL&&pool_key(action))return true;
+  if(U.panel==FASTFOOD && client_fastfood_key(action))return true;
+  if(U.panel==BATTLE && client_battle_key(action))return true;
   if(U.panel==SNOW && client_snow_key(action))return true;
   if(U.panel==SNOW && action==SHOW_Y)return true;
   if(U.panel==SHOP && client_shop_key(action))return true;
@@ -1696,6 +1751,7 @@ bool client_ui_move(int dx,int dy) {
   if(net_state()==NET_REPLACED || U.alert)return true;
   if(U.panel==POOL&&pool_move(dx,dy))return true;
   if(U.panel==SNOW && client_snow_move(dx,dy))return true;
+  if(U.panel==BATTLE && client_battle_move(dx,dy))return true;
   if(U.panel==SHOP && client_shop_move(dx,dy))return true;
   if(!U.panel)return false;
   if(!U.count)return true;
@@ -1718,6 +1774,7 @@ bool client_ui_tap(float x,float y) {
   if(U.chip_w>0 && x>=U.chip_x && x<U.chip_x+U.chip_w && y>=U.chip_y && y<U.chip_y+U.chip_h){open_panel(CHIPS);return true;}
   if(W.in_room && y<(U.tv?16:0)+31)return true;  /* the top bar is not the floor */
   if(U.panel==SNOW && client_snow_tap(x,y))return true;
+  if(U.panel==BATTLE && client_battle_tap(x,y))return true;
   if(U.panel==SHOP && client_shop_building() && x>=client_ui_room_left() && y<SCREEN_H-32-(U.tv?16:0))return false;
   return U.panel || y>=SCREEN_H-32-(U.tv?16:0);
 }

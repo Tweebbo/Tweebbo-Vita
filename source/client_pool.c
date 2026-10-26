@@ -1,3 +1,4 @@
+#include "language.h"
 // Lido activities on the console: the server decides everything (server/src/room/activities.rs,
 // diving.rs); this file reads its ACTIVITY state, offers the actions with A and draws the original
 // game artwork packed into the scene pages (tools/pack.py SCENE_ART), like the web edition's
@@ -379,7 +380,7 @@ bool pool_context(char *label, int cap, u64 now) {
     best = d; spot = s;
   }
   if (!spot) return false;
-  snprintf(label, cap, "%s", spot->label);
+  snprintf(label, cap, "%s", TR(spot->label));
   return true;
 }
 
@@ -502,7 +503,7 @@ void pool_draw_booth(void){
   float wx=(SCREEN_W-432*k)/2,wy=(SCREEN_H-354*k)/2;
   float x=wx+8*k,y=wy+28*k;
   fill_rect(0,0,SCREEN_W,SCREEN_H,rgba(0,0,0,51));
-  client_ui_window(wx,wy,432*k,354*k,"Changing booth");
+  client_ui_window(wx,wy,432*k,354*k,TR("Changing booth"));
   const SceneArt *bg=gfx_art("pelle1");
   if(bg)gfx_art_draw(bg,x,y,k,k,0xffffffff);
   else client_ui_panel(x,y,416*k,322*k);
@@ -526,26 +527,26 @@ void pool_draw_booth(void){
   if(right)gfx_art_draw(right,x+80*k,y+233*k,k,k,0xffffffff);
   if(exit)gfx_art_draw(exit,x+288*k,y+185*k,k,k,0xffffffff);
   if(swim)gfx_art_draw(swim,x+287*k,y+234*k,k,k,0xffffffff);
-  text_draw("Choose Costume",x+62.5f*k,y+176*k,10,rgba(0,0,0,255),1);
-  text_draw("Colour",x+62.5f*k,y+188*k,10,rgba(0,0,0,255),1);
-  text_draw("Exit In Normal",x+338*k,y+195*k,10,rgba(0,0,0,255),1);
-  text_draw("Clothes",x+338*k,y+207*k,10,rgba(0,0,0,255),1);
-  text_draw("Go swimming!",x+338*k,y+243*k,10,rgba(0,0,0,255),1);
+  text_draw(TR("Choose Costume"),x+62.5f*k,y+176*k,10,rgba(0,0,0,255),1);
+  text_draw(TR("Colour"),x+62.5f*k,y+188*k,10,rgba(0,0,0,255),1);
+  text_draw(TR("Exit In Normal"),x+338*k,y+195*k,10,rgba(0,0,0,255),1);
+  text_draw(TR("Clothes"),x+338*k,y+207*k,10,rgba(0,0,0,255),1);
+  text_draw(TR("Go swimming!"),x+338*k,y+243*k,10,rgba(0,0,0,255),1);
 }
 void pool_draw_panel(float x,float y,float w){
   int mode=pool_mode();
   if(mode==HUD_VOTE){
-    client_ui_paragraph("Rate the dive. The room's average becomes the score.",x+10,y+32,w-20,3,0x18272a);
+    client_ui_paragraph(TR("Rate the dive. The room's average becomes the score."),x+10,y+32,w-20,3,0x18272a);
     for(int i=1;i<=10;i++){char label[16];snprintf(label,sizeof label,"%d",i);client_ui_button(x+8+(i-1)%5*59,y+92+(i-1)/5*36,55,30,label,VOTE,i);}
   }else if(mode==HUD_DIVE){
-    client_ui_label(P.dive.m.airborne?"Pad: pose / back button: somersault":"Alternate left / right. Confirm jumps.",x+10,y+31,w-20,0x18272a);
+    client_ui_label(P.dive.m.airborne?TR("Pad: pose / back button: somersault"):TR("Alternate left / right. Confirm jumps."),x+10,y+31,w-20,0x18272a);
     static const char *names[]={"Run left","Run right","Pose up","Pose right","Pose down","Pose left","Somersault","Jump"};
-    for(int i=1;i<=8;i++)client_ui_button(x+8+(i-1)%2*148,y+58+(i-1)/2*35,144,30,names[i-1],((P.dive.m.airborne && i>=3&&i<=7)||(!P.dive.m.airborne&&(i<3||i==8)))?DIVE:0,i);
+    for(int i=1;i<=8;i++)client_ui_button(x+8+(i-1)%2*148,y+58+(i-1)/2*35,144,30,TR(names[i-1]),((P.dive.m.airborne && i>=3&&i<=7)||(!P.dive.m.airborne&&(i<3||i==8)))?DIVE:0,i);
   }else if(mode==HUD_WOBBLE){
     const Wobbler *me=P.wob.p[0].eid==W.me?&P.wob.p[0]:&P.wob.p[1];char line[96];
-    snprintf(line,sizeof line,"Balance %d / Steady: %s",me->balance,me->rebalanced?"used":"available");client_ui_label(line,x+10,y+30,w-20,0x18272a);
+    snprintf(line,sizeof line,TR("Balance %d / Steady: %s"),me->balance,TR(me->rebalanced?"used":"available"));client_ui_label(line,x+10,y+30,w-20,0x18272a);
     static const char *names[]={"Lean left (L)","Lean right (R)","Push left","Push right","Step back","Step forward","Steady"};
-    for(int i=1;i<=7;i++)client_ui_button(x+8+(i-1)%2*148,y+57+(i-1)/2*35,144,30,names[i-1],i==7&&me->rebalanced?0:WOBBLE,i);
+    for(int i=1;i<=7;i++)client_ui_button(x+8+(i-1)%2*148,y+57+(i-1)/2*35,144,30,TR(names[i-1]),i==7&&me->rebalanced?0:WOBBLE,i);
   }
 }
 void pool_draw_hud(void){
@@ -558,5 +559,5 @@ void pool_draw_hud(void){
     bool enabled=mode!=HUD_DIVE||(P.dive.m.airborne?(i>=2&&i<=6):(i<2||i==7));
     client_ui_button(6+i%5*w,y+i/5*30,w-4,27,mode==HUD_DIVE?dive[i]:wobble[i],enabled?(mode==HUD_DIVE?DIVE:WOBBLE):0,i+1);
   }
-  client_ui_button(6+4*w,y+30,w-4,27,mode==HUD_DIVE?"Leave (R)":"Leave / Back",LEAVE,0);
+  client_ui_button(6+4*w,y+30,w-4,27,mode==HUD_DIVE?TR("Leave (R)"):TR("Leave / Back"),LEAVE,0);
 }

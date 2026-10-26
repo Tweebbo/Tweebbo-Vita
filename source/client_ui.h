@@ -59,3 +59,7 @@ void client_ui_feedback(void);
 void client_ui_person(u32 id);
 
 void client_ui_support(void);
+
+void client_ui_fastfood(void);
+void client_ui_battle(void);
+void client_ui_snow(void);

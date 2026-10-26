@@ -4,6 +4,10 @@
 // Colors are ABGR (0xAABBGGRR), like citro2d and vita2d.
 #pragma once
 #include "assets.h"
+bool gfx_battle_load(int arena);
+void gfx_battle_free(void);
+void gfx_battle_blend(int mode);
+void gfx_battle_sprite(unsigned id,float x,float y,float kx,float ky,u32 color,float left,float top,float right,float bottom);
 
 /** Logical canvas of the showcase (the platform scales it by a whole factor). */
 #ifndef SCREEN_W
@@ -70,3 +74,7 @@ void text_fit(char *s, float size, float max);
 const SceneArt *gfx_art(const char *name);
 void gfx_art_draw(const SceneArt *a,float x,float y,float kx,float ky,u32 color);
 void gfx_sprite_transform(float x,float y,float kx,float ky);
+
+bool gfx_fastfood_load(void);
+void gfx_fastfood_free(void);
+void gfx_fastfood_sprite(unsigned id,float x,float y,float kx,float ky,u32 color,float left,float top,float right,float bottom);

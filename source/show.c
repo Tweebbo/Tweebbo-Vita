@@ -1,3 +1,5 @@
+#include "fastfood.h"
+#include "battle.h"
 // Shared room renderer for the Switch and Vita clients.
 #include "show.h"
 #include "igloo.h"
@@ -588,6 +590,8 @@ static void draw_ui(u64 now) {
 
 void show_frame(u64 now) {
   gfx_filter(false);
+  if(fastfood_active()){fastfood_draw(0,0,SCREEN_W,SCREEN_H);client_ui_draw();return;}
+  if(battle_active()){battle_draw(SCREEN_W,SCREEN_H,now);client_ui_draw();return;}
   if(client_snow_scene(now)){client_ui_draw();return;}
   if (!W.in_room) {
     NetState state = net_state();
@@ -837,6 +841,6 @@ void show_action(int action) {
 
 float show_zoom(void){return V.zoom;}
 void show_to_screen(float wx,float wy,float *x,float *y){*x=scr_x(wx);*y=scr_y(wy);}
-void on_activity(const char *json){if(!client_bar_receive(json,now_ms()))pool_receive(json,now_ms());}
+void on_activity(const char *json){battle_receive(json,now_ms());if(!client_bar_receive(json,now_ms()))pool_receive(json,now_ms());}
 
 void on_music(const char *json){client_music_receive(json,now_ms());}

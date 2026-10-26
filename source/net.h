@@ -88,3 +88,9 @@ void send_room_mod(int op, u32 target, int length);
 void send_activity(const char *json);
 
 void send_music(const char *json);
+
+/* JSON game messages are bounded and transferred on the network thread. */
+bool net_fastfood_enable(bool enabled);
+bool net_fastfood_send(const char *json);
+/* Caller frees the returned message. NULL means no pending message. */
+char *net_fastfood_receive(void);

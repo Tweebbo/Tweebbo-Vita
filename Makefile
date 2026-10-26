@@ -20,6 +20,7 @@ ifeq ($(TWEEBBO_LAN_ONLY),1)
 CFLAGS  += -DTWEEBBO_LAN_ONLY=1
 endif
 LDFLAGS := -Wl,-q -Wl,--gc-sections
+LDFLAGS += -Wl,--wrap=sceGxmShaderPatcherCreateFragmentProgram -Wl,--wrap=sceGxmSetFragmentProgram
 
 BUILD ?= build
 
@@ -47,10 +48,11 @@ build/jansson/jansson/lib/libjansson.a: vendor/jansson-2.14.tar.gz tools/jansson
 	cmake --build build/jansson -j4
 
 $(OBJ): build/jansson/jansson/lib/libjansson.a VERSION $(wildcard source/*.h source/vita/*.h)
+$(BUILD)/main.o: tools/emu/games-exercise.h
 
-# Rebuild everything when the baked hotel address changes.
+# Test instrumentation must not survive a normal build.
 $(BUILD)/server.stamp: FORCE | $(BUILD)
-	@echo '$(TWEEBBO_SERVER) $(TWEEBBO_LAN_ONLY)' | cmp -s - $@ || echo '$(TWEEBBO_SERVER) $(TWEEBBO_LAN_ONLY)' > $@
+	@echo '$(TWEEBBO_SERVER) $(TWEEBBO_LAN_ONLY) $(EXTRA_CFLAGS)' | cmp -s - $@ || echo '$(TWEEBBO_SERVER) $(TWEEBBO_LAN_ONLY) $(EXTRA_CFLAGS)' > $@
 
 $(BUILD)/%.o: source/%.c $(BUILD)/server.stamp | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -74,7 +76,7 @@ $(BUILD)/$(TARGET).elf: $(OBJ)
 romfs/furni.pak: $(wildcard romfs/furni/*.png)
 	python3 tools/pack-furni.py
 
-out/$(TARGET).vpk: $(BUILD)/$(TARGET).elf $(SCE_SYS) romfs/furni.pak $(wildcard romfs/gfx/*.png) $(wildcard romfs/spaces/*) $(wildcard romfs/snow/*) tools/pack-vpk.py
+out/$(TARGET).vpk: $(BUILD)/$(TARGET).elf $(SCE_SYS) romfs/furni.pak $(wildcard romfs/gfx/*.png) $(wildcard romfs/spaces/*) $(wildcard romfs/snow/*) $(wildcard romfs/fastfood/*) $(wildcard romfs/battle/*) $(wildcard romfs/lang/*) tools/pack-vpk.py
 	vita-elf-create $(BUILD)/$(TARGET).elf $(BUILD)/$(TARGET).velf
 	vita-make-fself -c $(BUILD)/$(TARGET).velf $(BUILD)/eboot.bin
 	vita-mksfoex -s TITLE_ID=$(TITLE_ID) "$(APP_NAME)" $(BUILD)/param.sfo

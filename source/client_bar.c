@@ -1,3 +1,4 @@
+#include "language.h"
 // After Hours Bar on the console: the menu comes from the server (prices and contents are
 // decided there, server room/bar.rs); orders walk the guest to a free stool and Vic serves.
 #include "client_bar.h"
@@ -113,7 +114,7 @@ bool client_bar_context(char *label, int cap, u64 now) {
     near = e->used && e->guest >= STAFF_BASE && !strncmp(e->name, "Bartender", 9) && abs(e->x - me->x) <= 2 && abs(e->y - me->y) <= 2;
   }
   if (!near) return false;
-  snprintf(label, cap, bar_holding() ? "Bar · what you are holding" : "Order at the bar");
+  snprintf(label, cap, "%s", bar_holding() ? TR("Bar · what you are holding") : TR("Order at the bar"));
   return true;
 }
 
@@ -147,38 +148,38 @@ void client_bar_action(int cmd,int arg){
   if(cmd==GIVE&&giveable(world_ent((u32)arg))){char extra[32];snprintf(extra,sizeof extra,"\"target\":%u",(u32)arg);command("bar_give",extra);B.picking=false;client_ui_changed();}
 }
 void client_bar_draw(float x,float y,float w){
-  if(!net_online()||!bar_room()){client_ui_paragraph("Visit After Hours Bar while connected to order and use bar items.",x+10,y+36,w-20,4,0x18272a);return;}
+  if(!net_online()||!bar_room()){client_ui_paragraph(TR("Visit After Hours Bar while connected to order and use bar items."),x+10,y+36,w-20,4,0x18272a);return;}
   if(B.confirm){
-    MenuItem *m=&B.menu[B.selected];char line[100];snprintf(line,sizeof line,"Order %s for %d credit%s?",m->name,m->price,m->price==1?"":"s");
+    MenuItem *m=&B.menu[B.selected];char line[100];snprintf(line,sizeof line,TR("Order %s for %d credit%s?"),m->name,m->price,m->price==1?"":"s");
     client_ui_paragraph(line,x+10,y+38,w-20,3,0x18272a);
-    client_ui_paragraph("Vic serves at a free stool. You pay when served.",x+10,y+100,w-20,3,0x18272a);
-    client_ui_button(x+8,y+180,140,26,"Cancel",CANCEL,0);client_ui_button(x+156,y+180,146,26,"Order",!B.pending&&m->price>=0&&(u32)m->price<=W.credits?ORDER:0,0);return;
+    client_ui_paragraph(TR("Vic serves at a free stool. You pay when served."),x+10,y+100,w-20,3,0x18272a);
+    client_ui_button(x+8,y+180,140,26,TR("Cancel"),CANCEL,0);client_ui_button(x+156,y+180,146,26,TR("Order"),!B.pending&&m->price>=0&&(u32)m->price<=W.credits?ORDER:0,0);return;
   }
   if(bar_holding()&&!B.menu_mode){
     Ent *me=world_ent(W.me);avatar_draw_held(me->drink,x+28,y+48,2);
-    client_ui_label(smoke(me->drink)?"Your smoke":"Your drink",x+54,y+34,w-64,0x18272a);
-    client_ui_button(x+8,y+68,90,26,smoke(me->drink)?"Puff":"Sip",USE,0);
-    client_ui_button(x+108,y+68,90,26,"Cheers!",smoke(me->drink)?0:TOAST,0);
-    client_ui_button(x+208,y+68,94,26,"Put down",DROP,0);
-    client_ui_button(x+8,y+100,144,26,"Hand over",PICK,0);client_ui_button(x+158,y+100,144,26,"Order another",MENU,0);
+    client_ui_label(smoke(me->drink)?TR("Your smoke"):TR("Your drink"),x+54,y+34,w-64,0x18272a);
+    client_ui_button(x+8,y+68,90,26,smoke(me->drink)?TR("Puff"):TR("Sip"),USE,0);
+    client_ui_button(x+108,y+68,90,26,TR("Cheers!"),smoke(me->drink)?0:TOAST,0);
+    client_ui_button(x+208,y+68,94,26,TR("Put down"),DROP,0);
+    client_ui_button(x+8,y+100,144,26,TR("Hand over"),PICK,0);client_ui_button(x+158,y+100,144,26,TR("Order another"),MENU,0);
     if(B.picking){
       int ids[MAX_ENTS],n=0;for(int i=0;i<MAX_ENTS;i++)if(giveable(&W.ents[i]))ids[n++]=i;
       if(B.page*2>=n)B.page=0;
       for(int row=0;row<2&&B.page*2+row<n;row++){Ent *e=&W.ents[ids[B.page*2+row]];client_ui_button(x+8,y+132+row*28,w-16,25,e->name,GIVE,(int)e->id);}
-      if(n>2)client_ui_button(x+8,y+190,w-16,23,"More players",PAGE,1);
-      if(!n)client_ui_label("Stand by someone with an empty hand.",x+10,y+142,w-20,0x18272a);
+      if(n>2)client_ui_button(x+8,y+190,w-16,23,TR("More players"),PAGE,1);
+      if(!n)client_ui_label(TR("Stand by someone with an empty hand."),x+10,y+142,w-20,0x18272a);
     }return;
   }
   if(!B.menu_n){
     if(!B.asked){B.asked=true;B.asked_at=now_ms();command("bar_menu",NULL);}
-    client_ui_label("Loading the bar menu...",x+10,y+40,w-20,0x18272a);
-    client_ui_button(x+8,y+180,w-16,26,"Retry",now_ms()-B.asked_at>8000?REFRESH:0,0);return;
+    client_ui_label(TR("Loading the bar menu..."),x+10,y+40,w-20,0x18272a);
+    client_ui_button(x+8,y+180,w-16,26,TR("Retry"),now_ms()-B.asked_at>8000?REFRESH:0,0);return;
   }
   if(B.page*4>=B.menu_n)B.page=0;
   for(int row=0;row<4&&B.page*4+row<B.menu_n;row++){
-    int i=B.page*4+row;MenuItem *m=&B.menu[i];char line[100];snprintf(line,sizeof line,"%s / %d credit%s",m->name,m->price,m->price==1?"":"s");
+    int i=B.page*4+row;MenuItem *m=&B.menu[i];char line[100];snprintf(line,sizeof line,TR("%s / %d credit%s"),m->name,m->price,m->price==1?"":"s");
     avatar_draw_held(m->id,x+24,y+44+row*36,1);client_ui_button(x+44,y+28+row*36,w-52,31,line,!B.pending?SELECT:0,i);
   }
-  client_ui_button(x+8,y+184,140,26,"Previous",B.page?PAGE:0,-1);
-  client_ui_button(x+156,y+184,146,26,"Next",(B.page+1)*4<B.menu_n?PAGE:0,1);
+  client_ui_button(x+8,y+184,140,26,TR("Previous"),B.page?PAGE:0,-1);
+  client_ui_button(x+156,y+184,146,26,TR("Next"),(B.page+1)*4<B.menu_n?PAGE:0,1);
 }

@@ -21,9 +21,15 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as zf:
         zf.write(path, "sce_sys/livearea/contents/" + os.path.basename(path))
     for path in sorted(glob.glob("romfs/gfx/*.png")):
         zf.write(path, "gfx/" + os.path.basename(path))
-    for path in sorted(glob.glob("romfs/snow/*")):
-        zf.write(path, "snow/" + os.path.basename(path))
+    for game in ("snow", "fastfood", "battle"):
+        bundle = f"romfs/{game}/game.js"
+        if not os.path.isfile(bundle):
+            raise SystemExit(f"Missing native game bundle: {bundle}. Fetch the matched assets first.")
+        for path in sorted(glob.glob(f"romfs/{game}/*")):
+            zf.write(path, game + "/" + os.path.basename(path))
     zf.write("romfs/furni.pak", "furni.pak")
+    for path in sorted(glob.glob("romfs/lang/*")):
+        zf.write(path, "lang/" + os.path.basename(path))
     for path in sorted(glob.glob("romfs/spaces/*")):
         zf.write(path, "spaces/" + os.path.basename(path))
 

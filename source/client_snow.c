@@ -1,3 +1,5 @@
+#include "language.h"
+#include "language_js.h"
 #include "client_snow.h"
 #include "audio.h"
 #include "client_ui.h"
@@ -77,7 +79,7 @@ static void exception(void){
   JSValue stack=JS_GetPropertyStr(context,e,"stack");const char *trace=JS_ToCString(context,stack);
   if(trace)dbg_log("Snow Storm stack: %s",trace);
   JS_FreeCString(context,trace);JS_FreeValue(context,stack);
-  snprintf(error,sizeof error,"Snow Storm stopped safely. Reopen it to reconnect to your match.");
+  snprintf(error,sizeof error,"%s",s&&strstr(s,"versions differ")?"Update Tweebbo to play Snow Storm with this hotel.":"Snow Storm stopped safely. Reopen it to reconnect to your match.");
   JS_FreeCString(context,s);JS_FreeValue(context,e);
 }
 static JSValue call(const char *name,int n,JSValue *args){
@@ -97,6 +99,7 @@ static bool init(void){
   JS_SetGCThreshold(runtime,512u*1024);
   deadline=now_ms()+5000;context=JS_NewContext(runtime);if(!context)return false;
   JSValue global=JS_GetGlobalObject(context);
+  JS_SetPropertyStr(context,global,"nativeTranslate",JS_NewCFunction(context,tw_js_translate,"nativeTranslate",1));
   struct {const char *name;JSCFunction *fn;int argc;} fns[]={{"nativeSprite",sprite,11},{"nativeRect",rectangle,7},{"nativeText",text,6},{"nativeMeasure",measure,2},{"nativeSend",send_packet,1},{"nativeSound",sound,2},{"nativeStopWalk",stop_walk,0}};
   for(unsigned i=0;i<COUNT(fns);i++)JS_SetPropertyStr(context,global,fns[i].name,JS_NewCFunction(context,fns[i].fn,fns[i].name,fns[i].argc));
   { /* Guards against toolchain miscompiles of QuickJS (see Makefile): string iteration must end. */
@@ -147,10 +150,10 @@ void client_snow_update(void){
   if(!active){if(textures){gfx_snow_free();textures=false;}return;}
   if(error[0])return;
   if(!context){
-    if(!init()){if(!error[0])snprintf(error,sizeof error,"Snow Storm could not start. Close it and try again.");return;}
+    if(!init()){if(!error[0])snprintf(error,sizeof error,"%s",TR("Snow Storm could not start. Close it and try again."));return;}
     number_call("open",W.me);
   }
-  if(!textures){if(!gfx_snow_load()){snprintf(error,sizeof error,"Could not load Snow Storm graphics. Close and retry.");return;}textures=true;}
+  if(!textures){if(!gfx_snow_load()){snprintf(error,sizeof error,"%s",TR("Could not load Snow Storm graphics. Close and retry."));return;}textures=true;}
   u64 now=now_ms();number_call("tick",now);
   if(now-snapshot_at>=60){
     JSValue a=JS_NewFloat64(context,now),r=call("status",1,&a);const char *s=JS_ToCString(context,r);
@@ -200,7 +203,7 @@ void client_snow_action(int cmd,int value){
   case RESUME:menu=false;break;
   case MENU:menu=true;break;
   case LOBBY:invoke("leave");break;
-  case CHAT:client_ui_edit("Snow Storm chat", "",chat_submit);break;
+  case CHAT:client_ui_edit(TR("Snow Storm chat"), "",chat_submit);break;
   case MAKE:invoke("make");break;
   case THROW:invoke("throw");break;
   case ARC:invoke("trajectory");break;
@@ -233,40 +236,38 @@ void client_snow_action(int cmd,int value){
 }
 void client_snow_hud(void){
   json_t *s=json_object_get(snapshot,"state");char line[160];int left=num(s,"left");
-  snprintf(line,sizeof line,"%d:%02d  Health %d  Snowballs %d  |  L: target  R: zoom",left/60,left%60,num(s,"hp"),num(s,"balls"));
+  snprintf(line,sizeof line,TR("%d:%02d  Health %d  Snowballs %d  |  L: target  R: zoom"),left/60,left%60,num(s,"hp"),num(s,"balls"));
+  text_fit(line,11,SCREEN_W-12);
   fill_rect(0,0,SCREEN_W,20,color(0x26373a,1));text_draw(line,SCREEN_W/2,3,11,color(0xffffff,1),1);
   float x=(SCREEN_W-460)/2,y=SCREEN_H-28;
+  static const char *arcs[]={"Quick throw","Short arc","Long arc"};
+  client_ui_button(x,y,100,24,TR("Snowball"),MAKE,0);
+  client_ui_button(x+104,y,100,24,TR("Throw"),THROW,0);
+  client_ui_button(x+208,y,120,24,TR(arcs[num(snapshot,"trajectory")%3]),ARC,0);
+  client_ui_button(x+332,y,128,24,TR("Menu"),MENU,0);
 #if TWEEBBO_DEVICE == 3
-  client_ui_button(x,y,100,24,"Make (Square)",MAKE,0);
-  client_ui_button(x+104,y,100,24,"Throw (Cross)",THROW,0);
-  static const char *arcs[]={"Quick (Triangle)","Short (Triangle)","Long (Triangle)"};
+  const char *keys[]={"Square","Cross","Triangle","Circle"};
 #else
-  client_ui_button(x,y,100,24,"Make (X)",MAKE,0);
-  client_ui_button(x+104,y,100,24,"Throw (A)",THROW,0);
-  static const char *arcs[]={"Quick (Y)","Short arc (Y)","Long arc (Y)"};
+  const char *keys[]={"X","A","Y","B"};
 #endif
-  client_ui_button(x+208,y,120,24,arcs[num(snapshot,"trajectory")%3],ARC,0);
-#if TWEEBBO_DEVICE == 3
-  client_ui_button(x+332,y,128,24,"Menu (Circle)",MENU,0);
-#else
-  client_ui_button(x+332,y,128,24,"Menu (B)",MENU,0);
-#endif
+  const int offsets[]={4,108,212,336};
+  for(int i=0;i<4;i++)client_ui_key_hint(keys[i],"",x+offsets[i],y-18,0xffffff,0xffffff);
 }
 void client_snow_draw(float x,float y,float w){
   char line[160];
   if(error[0]){client_ui_paragraph(error,x+10,y+35,w-20,5,0x18272a);return;}
-  if(!snapshot){client_ui_label("Opening Snow Storm...",x+10,y+35,w-20,0x18272a);return;}
+  if(!snapshot){client_ui_label(TR("Opening Snow Storm..."),x+10,y+35,w-20,0x18272a);return;}
   if(confirm_leave){
-    client_ui_paragraph("Leave Snow Storm? A computer player will take your place in a running match.",x+10,y+40,w-20,4,0x18272a);
-    client_ui_button(x+8,y+180,140,26,"Keep playing",CANCEL,0);client_ui_button(x+156,y+180,146,26,"Leave",LEAVE,0);return;
+    client_ui_paragraph(TR("Leave Snow Storm? A computer player will take your place in a running match."),x+10,y+40,w-20,4,0x18272a);
+    client_ui_button(x+8,y+180,140,26,TR("Keep playing"),CANCEL,0);client_ui_button(x+156,y+180,146,26,TR("Leave"),LEAVE,0);return;
   }
   if(create_page){
     int values[]={arena,teams,players,minutes,level,fill};const char *labels[]={"Arena","Teams (1 = solo)","Players per team","Minutes","Bot level","Fill after (min)"};
     for(int i=0;i<6;i++){
-      snprintf(line,sizeof line,"%s: %d",labels[i],values[i]);client_ui_label(line,x+10,y+32+i*24,w-90,0x18272a);
+      snprintf(line,sizeof line,"%s: %d",TR(labels[i]),values[i]);client_ui_label(line,x+10,y+32+i*24,w-90,0x18272a);
       client_ui_button(x+w-76,y+28+i*24,30,22,"-",SETTING,-(i+1));client_ui_button(x+w-40,y+28+i*24,30,22,"+",SETTING,i+1);
     }
-    client_ui_button(x+8,y+182,w-16,26,"Create game",net_online()?SUBMIT:0,0);return;
+    client_ui_button(x+8,y+182,w-16,26,TR("Create game"),net_online()?SUBMIT:0,0);return;
   }
   if(is_mode("list")){
     json_t *list=json_object_get(snapshot,"games");int n=json_array_size(list);if(page*4>=n)page=0;
@@ -274,31 +275,31 @@ void client_snow_draw(float x,float y,float w){
       json_t *g=json_array_get(list,page*4+i);if(!g)break;
       snprintf(line,sizeof line,"%s | %u/%d",str(g,"name"),(unsigned)json_array_size(json_object_get(g,"roster")),num(g,"capacity"));
       client_ui_label(line,x+10,y+34+i*28,w-90,0x18272a);
-      bool running=json_is_true(json_object_get(g,"running"));client_ui_button(x+w-78,y+29+i*28,70,24,running?"Playing":"Join",!running&&net_online()?JOIN:0,num(g,"id"));
+      bool running=json_is_true(json_object_get(g,"running"));client_ui_button(x+w-78,y+29+i*28,70,24,running?TR("Playing"):TR("Join"),!running&&net_online()?JOIN:0,num(g,"id"));
     }
-    if(!n)client_ui_paragraph("No games in this room. Create one, or practise against computer players.",x+10,y+40,w-20,4,0x18272a);
-    client_ui_button(x+8,y+148,90,24,"Refresh",net_online()?REFRESH:0,0);
-    client_ui_button(x+108,y+148,90,24,"More",n>4?MORE:0,0);
-    client_ui_button(x+208,y+148,94,24,"Create",net_online()?CREATE:0,0);
-    client_ui_button(x+8,y+182,w-16,26,"Practice (no credits)",PRACTICE,0);return;
+    if(!n)client_ui_paragraph(TR("No games in this room. Create one, or practise against computer players."),x+10,y+40,w-20,4,0x18272a);
+    client_ui_button(x+8,y+148,90,24,TR("Refresh"),net_online()?REFRESH:0,0);
+    client_ui_button(x+108,y+148,90,24,TR("More"),n>4?MORE:0,0);
+    client_ui_button(x+208,y+148,94,24,TR("Create"),net_online()?CREATE:0,0);
+    client_ui_button(x+8,y+182,w-16,26,TR("Practice (no credits)"),PRACTICE,0);return;
   }
   if(is_mode("waiting")){
     json_t *g=json_object_get(snapshot,"waiting"),*list=json_object_get(g,"roster");
-    snprintf(line,sizeof line,"Arena %d | %d teams | %d min",num(g,"arena"),num(g,"teams"),num(g,"minutes"));client_ui_label(line,x+10,y+32,w-20,0x18272a);
+    snprintf(line,sizeof line,TR("Arena %d | %d teams | %d min"),num(g,"arena"),num(g,"teams"),num(g,"minutes"));client_ui_label(line,x+10,y+32,w-20,0x18272a);
     int count=json_array_size(list);if(page*5>=count)page=0;
-    for(int i=0;i<5&&page*5+i<count;i++){json_t *p=json_array_get(list,page*5+i);snprintf(line,sizeof line,"Team %d: %s",num(p,"team")+1,str(p,"name"));client_ui_label(line,x+10,y+55+i*18,w-20,0x18272a);}
-    if(count>5)client_ui_button(x+8,y+153,w-16,24,"More players",ROSTER_MORE,0);
-    client_ui_button(x+8,y+182,90,26,"Chat",CHAT,0);client_ui_button(x+108,y+182,w-116,26,"Start with bots",net_online()&&(u32)num(g,"host")==W.me?START:0,num(g,"id"));return;
+    for(int i=0;i<5&&page*5+i<count;i++){json_t *p=json_array_get(list,page*5+i);snprintf(line,sizeof line,TR("Team %d: %s"),num(p,"team")+1,str(p,"name"));client_ui_label(line,x+10,y+55+i*18,w-20,0x18272a);}
+    if(count>5)client_ui_button(x+8,y+153,w-16,24,TR("More players"),ROSTER_MORE,0);
+    client_ui_button(x+8,y+182,90,26,TR("Chat"),CHAT,0);client_ui_button(x+108,y+182,w-116,26,TR("Start with bots"),net_online()&&(u32)num(g,"host")==W.me?START:0,num(g,"id"));return;
   }
   json_t *avatars=json_object_get(json_object_get(snapshot,"state"),"avatars");
   if(is_mode("results")){
-    client_ui_label("Match finished",x+10,y+32,w-20,0x18272a);
+    client_ui_label(TR("Match finished"),x+10,y+32,w-20,0x18272a);
     int count=json_array_size(avatars);if(page*6>=count)page=0;
-    for(int i=0;i<6&&page*6+i<count;i++){json_t *p=json_array_get(avatars,page*6+i);snprintf(line,sizeof line,"%s: %d points",str(p,"name"),num(p,"score"));client_ui_label(line,x+10,y+54+i*17,w-20,0x18272a);}
-    if(count>6)client_ui_button(x+8,y+157,w-16,22,"More scores",ROSTER_MORE,0);
-    client_ui_button(x+8,y+182,w-16,26,"Back to Snow Storm lobby",LOBBY,0);return;
+    for(int i=0;i<6&&page*6+i<count;i++){json_t *p=json_array_get(avatars,page*6+i);snprintf(line,sizeof line,TR("%s: %d points"),str(p,"name"),num(p,"score"));client_ui_label(line,x+10,y+54+i*17,w-20,0x18272a);}
+    if(count>6)client_ui_button(x+8,y+157,w-16,22,TR("More scores"),ROSTER_MORE,0);
+    client_ui_button(x+8,y+182,w-16,26,TR("Back to Snow Storm lobby"),LOBBY,0);return;
   }
-  client_ui_label("Choose a rival; choose again for auto-aim.",x+10,y+31,w-20,0x18272a);
+  client_ui_label(TR("Choose a rival; choose again for auto-aim."),x+10,y+31,w-20,0x18272a);
   int enemies=0;for(size_t i=0;i<json_array_size(avatars);i++)if(json_is_true(json_object_get(json_array_get(avatars,i),"enemy")))enemies++;
   if(page*8>=enemies)page=0;
   int shown=0,skip=page*8;for(size_t i=0;i<json_array_size(avatars)&&shown<8;i++){
@@ -307,9 +308,9 @@ void client_snow_draw(float x,float y,float w){
     snprintf(line,sizeof line,"%s%s (%d)",json_is_true(json_object_get(p,"target"))?"> ":"",str(p,"name"),num(p,"hp"));
     client_ui_button(x+8+(shown%2)*148,y+54+(shown/2)*27,144,24,line,TARGET,i);shown++;
   }
-  if(enemies>8)client_ui_button(x+8,y+162,w-16,20,"More rivals",ROSTER_MORE,0);
-  else client_ui_label(json_is_true(json_object_get(snapshot,"syncing"))?"Waiting for server turns...":"Pad / tap: move. Play resumes below.",x+10,y+164,w-20,0x18272a);
-  client_ui_button(x+8,y+186,140,26,"Resume",RESUME,0);client_ui_button(x+156,y+186,146,26,"Chat",CHAT,0);
+  if(enemies>8)client_ui_button(x+8,y+162,w-16,20,TR("More rivals"),ROSTER_MORE,0);
+  else client_ui_label(json_is_true(json_object_get(snapshot,"syncing"))?TR("Waiting for server turns..."):TR("Pad / tap: move. Play resumes below."),x+10,y+164,w-20,0x18272a);
+  client_ui_button(x+8,y+186,140,26,TR("Resume"),RESUME,0);client_ui_button(x+156,y+186,146,26,TR("Chat"),CHAT,0);
 }
 
 bool client_snow_tap(float x,float y){

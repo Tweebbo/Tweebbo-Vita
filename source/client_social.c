@@ -1,3 +1,4 @@
+#include "language.h"
 #include "client_social.h"
 #include "client_ui.h"
 #include "net.h"
@@ -67,7 +68,7 @@ static bool message_done(const char *s) {
 static void message_cancelled(const char *s) {snprintf(F.draft,sizeof F.draft,"%s",s);F.draft_peer=F.peer;}
 void client_social_action(int command,int arg) {
   if(command==MY_PROFILE){view(MY_INFO);F.peer=0;return;}
-  if(command==EDIT_MISSION){if(!F.job)client_ui_edit("Mission (up to 50 characters)",string(json_object_get(F.contacts,"self"),"mission"),mission_done);return;}
+  if(command==EDIT_MISSION){if(!F.job)client_ui_edit(TR("Mission (up to 50 characters)"),string(json_object_get(F.contacts,"self"),"mission"),mission_done);return;}
   if(command==TAB) {view(arg);F.peer=0;return;}
   if(command==PAGE) {if(F.view==CONVERSATION){F.message_page+=arg;F.text_offset=0;}else F.page+=arg;client_ui_changed();return;}
   if(command==TEXT_PAGE) {F.text_offset=arg?F.next_text:0;client_ui_changed();return;}
@@ -77,8 +78,8 @@ void client_social_action(int command,int arg) {
   if(command==CHAT) {if(find(FRIENDS,F.peer)){view(CONVERSATION);F.message_page=0;F.text_offset=0;json_decref(F.messages);F.messages=NULL;F.next_poll=0;}return;}
   if(command==VISIT) {json_t *c=find(FRIENDS,F.peer);const char *room=string(c,"room");if(*room)net_goto(room,"");return;}
   if(F.job)return;
-  if(command==SEARCH) {client_ui_edit("Find a player",F.query,search_done);return;}
-  if(command==WRITE) {client_ui_edit_draft("Private message",F.draft,message_done,message_cancelled);return;}
+  if(command==SEARCH) {client_ui_edit(TR("Find a player"),F.query,search_done);return;}
+  if(command==WRITE) {client_ui_edit_draft(TR("Private message"),F.draft,message_done,message_cancelled);return;}
   if(command==REMOVE || command==BLOCK) {F.confirm=command;view(CONFIRM);return;}
   const char *action=command==REQUEST?"request":command==ACCEPT?"accept":command==REJECT?"reject":command==CANCEL?"cancel":command==UNBLOCK?"unblock":NULL;
   if(command==CONFIRM_ACTION)action=F.confirm==REMOVE?"remove":"block";
@@ -119,21 +120,21 @@ void client_social_update(bool visible) {
 }
 void client_social_draw(float x,float y,float w) {
   char line[256];
-  if(!net_online()) {client_ui_paragraph("Connect to the hotel to use Friends and private messages.",x+10,y+40,w-20,3,0x18272a);return;}
+  if(!net_online()) {client_ui_paragraph(TR("Connect to the hotel to use Friends and private messages."),x+10,y+40,w-20,3,0x18272a);return;}
   if(F.view==MY_INFO) {
     json_t *me=json_object_get(F.contacts,"self");
     client_ui_label(W.name,x+10,y+34,w-20,0x18272a);
-    client_ui_label("Mission",x+10,y+60,w-20,0x26373a);
+    client_ui_label(TR("Mission"),x+10,y+60,w-20,0x26373a);
     client_ui_paragraph(string(me,"mission"),x+10,y+80,w-20,4,0x18272a);
-    client_ui_button(x+8,y+151,w-16,26,"Edit mission",!F.job?EDIT_MISSION:0,0);
-    client_ui_button(x+8,y+188,w-16,24,"Friends",TAB,FRIENDS);
+    client_ui_button(x+8,y+151,w-16,26,TR("Edit mission"),!F.job?EDIT_MISSION:0,0);
+    client_ui_button(x+8,y+188,w-16,24,TR("Friends"),TAB,FRIENDS);
     return;
   }
   if(F.view<=RESULTS) {
     static const char *tabs[]={"Friends","Received","Sent","Blocked"};
     for(int i=0;i<4;i++)client_ui_button(x+8+i*74,y+28,70,23,tabs[i],TAB,i);
-    client_ui_field(x+8,y+55,142,23,F.query,"Find a player",!F.job?SEARCH:0,0);
-    client_ui_button(x+156,y+55,146,23,"My info",MY_PROFILE,0);
+    client_ui_field(x+8,y+55,142,23,F.query,TR("Find a player"),!F.job?SEARCH:0,0);
+    client_ui_button(x+156,y+55,146,23,TR("My info"),MY_PROFILE,0);
     json_t *rows=list(F.view);int n=(int)json_array_size(rows),pages=(n+3)/4;if(pages<1)pages=1;
     if(F.page<0)F.page=0;
     if(F.page>=pages)F.page=pages-1;
@@ -143,45 +144,45 @@ void client_social_draw(float x,float y,float w) {
       snprintf(line,sizeof line,"%s%s%s",string(c,"name"),*string(c,"room")?" (online)":"",unread?" *":"");
       client_ui_button(x+8,y+83+row*25,w-16,23,line,SELECT,(int)id(c));
     }
-    if(!n)client_ui_label(F.job?"Loading...":*F.status?F.status:"No players in this list.",x+10,y+93,w-20,0x26373a);
-    client_ui_button(x+8,y+188,80,24,"Previous",F.page?PAGE:0,-1);
+    if(!n)client_ui_label(F.job?TR("Loading..."):*F.status?F.status:TR("No players in this list."),x+10,y+93,w-20,0x26373a);
+    client_ui_button(x+8,y+188,80,24,TR("Previous"),F.page?PAGE:0,-1);
     snprintf(line,sizeof line,"%d / %d",F.page+1,pages);client_ui_label(line,x+119,y+194,80,0x18272a);
-    client_ui_button(x+w-88,y+188,80,24,"Next",F.page+1<pages?PAGE:0,1);
+    client_ui_button(x+w-88,y+188,80,24,TR("Next"),F.page+1<pages?PAGE:0,1);
     return;
   }
   json_t *c=find(F.from,F.peer);if(!c)c=find(FRIENDS,F.peer);
-  client_ui_label(c?string(c,"name"):"Player",x+10,y+32,w-100,0x18272a);
-  client_ui_button(x+w-88,y+27,80,24,"Back",BACK,0);
+  client_ui_label(c?string(c,"name"):TR("Player"),x+10,y+32,w-100,0x18272a);
+  client_ui_button(x+w-88,y+27,80,24,TR("Back"),BACK,0);
   bool enabled=!F.job && F.peer!=W.guest_id;
   if(F.view==CONVERSATION) {
     int n=(int)json_array_size(F.messages),pages=n?n:1;
     if(F.message_page<0)F.message_page=0;
     if(F.message_page>=pages)F.message_page=pages-1;
     json_t *m=n?json_array_get(F.messages,n-1-F.message_page):NULL;
-    client_ui_label(m?(json_integer_value(json_object_get(m,"sender"))==W.guest_id?"You":string(c,"name")):F.job?"Loading...":"No messages yet.",x+10,y+60,w-20,0x26373a);
+    client_ui_label(m?(json_integer_value(json_object_get(m,"sender"))==W.guest_id?TR("You"):string(c,"name")):F.job?TR("Loading..."):TR("No messages yet."),x+10,y+60,w-20,0x26373a);
     const char *body=string(m,"text");size_t length=strlen(body);if(F.text_offset>length)F.text_offset=0;
     F.next_text=F.text_offset+client_ui_paragraph(body+F.text_offset,x+10,y+81,w-20,4,0x18272a);
-    if(F.text_offset)client_ui_button(x+8,y+155,130,23,"Message start",TEXT_PAGE,0);
-    if(F.next_text<length)client_ui_button(x+150,y+155,152,23,"Read more",TEXT_PAGE,1);
-    client_ui_button(x+8,y+188,80,24,"Older",F.message_page+1<pages?PAGE:0,1);
-    client_ui_button(x+94,y+188,80,24,"Newer",F.message_page?PAGE:0,-1);
-    client_ui_button(x+180,y+188,w-188,24,"Write",!F.job&&find(FRIENDS,F.peer)?WRITE:0,0);
+    if(F.text_offset)client_ui_button(x+8,y+155,130,23,TR("Message start"),TEXT_PAGE,0);
+    if(F.next_text<length)client_ui_button(x+150,y+155,152,23,TR("Read more"),TEXT_PAGE,1);
+    client_ui_button(x+8,y+188,80,24,TR("Older"),F.message_page+1<pages?PAGE:0,1);
+    client_ui_button(x+94,y+188,80,24,TR("Newer"),F.message_page?PAGE:0,-1);
+    client_ui_button(x+180,y+188,w-188,24,TR("Write"),!F.job&&find(FRIENDS,F.peer)?WRITE:0,0);
     return;
   }
   if(F.view==CONFIRM) {
-    client_ui_paragraph(F.confirm==REMOVE?"Remove this player from your friends?":"Block this player and their messages?",x+10,y+70,w-20,3,0x18272a);
-    client_ui_button(x+8,y+155,w-16,26,"Confirm",enabled?CONFIRM_ACTION:0,0);
-  } else if(find(BLOCKED,F.peer))client_ui_button(x+8,y+65,w-16,26,"Unblock player",enabled?UNBLOCK:0,0);
+    client_ui_paragraph(F.confirm==REMOVE?TR("Remove this player from your friends?"):TR("Block this player and their messages?"),x+10,y+70,w-20,3,0x18272a);
+    client_ui_button(x+8,y+155,w-16,26,TR("Confirm"),enabled?CONFIRM_ACTION:0,0);
+  } else if(find(BLOCKED,F.peer))client_ui_button(x+8,y+65,w-16,26,TR("Unblock player"),enabled?UNBLOCK:0,0);
   else {
     if(find(FRIENDS,F.peer)) {
-      client_ui_button(x+8,y+60,142,26,"Private chat",CHAT,0);
-      client_ui_button(x+156,y+60,146,26,"Visit room",*string(find(FRIENDS,F.peer),"room")?VISIT:0,0);
-      client_ui_button(x+8,y+94,w-16,26,"Remove friend",enabled?REMOVE:0,0);
+      client_ui_button(x+8,y+60,142,26,TR("Private chat"),CHAT,0);
+      client_ui_button(x+156,y+60,146,26,TR("Visit room"),*string(find(FRIENDS,F.peer),"room")?VISIT:0,0);
+      client_ui_button(x+8,y+94,w-16,26,TR("Remove friend"),enabled?REMOVE:0,0);
     } else if(find(INCOMING,F.peer)) {
-      client_ui_button(x+8,y+60,142,26,"Accept",enabled?ACCEPT:0,0);client_ui_button(x+156,y+60,146,26,"Decline",enabled?REJECT:0,0);
-    } else if(find(OUTGOING,F.peer))client_ui_button(x+8,y+60,w-16,26,"Cancel request",enabled?CANCEL:0,0);
-    else client_ui_button(x+8,y+60,w-16,26,"Add friend",enabled?REQUEST:0,0);
-    client_ui_button(x+8,y+126,w-16,26,"Block player",enabled?BLOCK:0,0);
+      client_ui_button(x+8,y+60,142,26,TR("Accept"),enabled?ACCEPT:0,0);client_ui_button(x+156,y+60,146,26,TR("Decline"),enabled?REJECT:0,0);
+    } else if(find(OUTGOING,F.peer))client_ui_button(x+8,y+60,w-16,26,TR("Cancel request"),enabled?CANCEL:0,0);
+    else client_ui_button(x+8,y+60,w-16,26,TR("Add friend"),enabled?REQUEST:0,0);
+    client_ui_button(x+8,y+126,w-16,26,TR("Block player"),enabled?BLOCK:0,0);
     client_ui_paragraph(string(c,"mission"),x+10,y+157,w-20,2,0x26373a);
   }
   client_ui_label(F.status,x+10,y+193,w-20,0x26373a);

@@ -1,5 +1,7 @@
 # Tweebbo for PlayStation Vita
 
+Version 1.4.0 adds Game Center with Fast Food, Battle Ball and Snow Storm, the classic game lobbies, six languages and smoother Fast Food graphics. Existing hotel features are retained. See [release notes](RELEASE.md) for installation and validation limits.
+
 Release 1.3.5, 2026-10-23: room layouts P, Q, R, S, X and Z use regenerated Kepler-style doorways (room images and maps repacked from the 3DS export). Builds verified; physical hardware still pending.
 
 Published follow-up, 2026-10-23: version 1.3.4 adds doorbell admission, profile badge selection and the Tweebbo Club catalogue shortcut, and fixes furniture animation and bear/terrier/pig rendering. The update is optional; existing clients remain admitted. Release builds and uploaded artifact hashes were verified. Physical-device checks remain pending. Older local-only notes below are historical.

@@ -13,4 +13,7 @@ romfs/furni.pak
 tools/emu-cache/
 build-offline/
 romfs/snow/
+romfs/fastfood/
+romfs/battle/
+romfs/lang/
 romfs/spaces/

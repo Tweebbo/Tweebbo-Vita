@@ -1,0 +1,30 @@
+# Requires the LAN-only TWEEBBO_GAMES_TEST package, not the normal VPK.
+awaitlog food-0 50
+wait 1
+shot food-6
+awaitlog food-1 30
+wait 1
+shot food-12
+awaitlog food-2 30
+wait 1
+shot food-18
+awaitlog battle-1 30
+wait 1
+shot battle-1
+awaitlog battle-2 25
+wait 1
+shot battle-2
+awaitlog battle-3 25
+wait 1
+shot battle-3
+awaitlog battle-4 25
+wait 1
+shot battle-4
+awaitlog battle-5 25
+wait 1
+shot battle-5
+awaitlog SHOT:.snow 30
+wait 1
+shot snow
+awaitlog PASS:.Vita 20
+shot return

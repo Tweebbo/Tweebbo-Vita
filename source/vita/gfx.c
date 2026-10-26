@@ -1,8 +1,12 @@
 // Tweebbo Vita graphics: vita2d with nearest filtering and a 2× integer canvas.
 // Implements the gfx.h contract (ABGR colors — the native vita2d format).
 #include "gfx.h"
+#include "language.h"
 #include "audio.h"
 #include "gen/snow_assets.h"
+#include "gen/fastfood_assets.h"
+#include "gen/battle_assets.h"
+#include "battle_blend.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,6 +31,7 @@
 
 static vita2d_texture *atlas[ATLAS_MAX];
 static vita2d_texture *font_tex;
+static vita2d_texture *cjk_tex;
 static vita2d_texture *pet_tex[64];
 static vita2d_texture *mask_tri_up, *mask_tri_down, *mask_disc;
 static float view_x,view_y,view_kx=1,view_ky=1;
@@ -221,9 +226,12 @@ void gfx_exit(void) {
   audio_exit();
   vita2d_wait_rendering_done();
   gfx_snow_free();
+  gfx_fastfood_free();
+  gfx_battle_free();
   for(int i=0;i<COUNT(pet_tex);i++)if(pet_tex[i]){vita2d_free_texture(pet_tex[i]);pet_tex[i]=NULL;}
   for (int i = 0; i < ATLAS_MAX; i++) if (atlas[i]) vita2d_free_texture(atlas[i]);
   if (font_tex) vita2d_free_texture(font_tex);
+  if (cjk_tex) vita2d_free_texture(cjk_tex);
   if (mask_tri_up) vita2d_free_texture(mask_tri_up);
   if (mask_tri_down) vita2d_free_texture(mask_tri_down);
   if (mask_disc) vita2d_free_texture(mask_disc);
@@ -232,6 +240,7 @@ void gfx_exit(void) {
   if(pak.f)fclose(pak.f);
   free(pak.idx);memset(&pak,0,sizeof pak);
   for (int i = 0; i < 4; i++) if (scene_v.tex[i]) { vita2d_free_texture(scene_v.tex[i]); scene_v.tex[i] = NULL; }
+  battle_blend_free();
   vita2d_fini();
 }
 
@@ -309,6 +318,14 @@ void gfx_sprite_solid(int page, int sx, int sy, int sw, int sh, float x, float y
 void gfx_font_sprite(int sx, int sy, int sw, int sh, float x, float y, bool flip, u32 color) {
   draw_tex(font_tex, sx, sy, sw, sh, x, y, 1, 1, flip, color);
 }
+bool gfx_language_font(int language){
+  // Wait before retiring an existing page; gfx_present already fences each frame.
+  if(cjk_tex)vita2d_wait_rendering_done();
+  vita2d_texture *next=NULL;
+  if(language==TW_ZH||language==TW_JA){next=load_png(language==TW_JA?"app0:gfx/font-ja.png":"app0:gfx/font-zh.png");if(!next)return false;}
+  if(cjk_tex)vita2d_free_texture(cjk_tex);cjk_tex=next;return true;
+}
+void gfx_cjk_sprite(int sx,int sy,int sw,int sh,float x,float y,unsigned color){if(cjk_tex)draw_tex(cjk_tex,sx,sy,sw,sh,x,y,1,1,false,color);}
 void gfx_pet_preload(int palette) {
   if(palette<0 || palette>=pet_palette_count || palette>=COUNT(pet_tex) || pet_tex[palette])return;
   char path[64];snprintf(path,sizeof path,"app0:gfx/pets_%d.png",palette);
@@ -453,8 +470,10 @@ const Scene *gfx_scene(const char *model) {
 
 void gfx_scene_sprite(const SceneSprite *s, float x, float y, float zoom, u8 alpha) {
   if (!scene_v.scene || s->page >= scene_v.pages) return;
+  if (s->additive) gfx_additive(true);
   draw_tex(scene_v.tex[s->page], s->sx, s->sy, s->w, s->h, x, y, zoom * s->dw / (float)s->w, zoom * s->dh / (float)s->h,
            false, ((u32)alpha << 24) | 0xffffff);
+  if (s->additive) gfx_additive(false);
 }
 
 void gfx_filter(bool linear) { (void)linear; }
@@ -540,6 +559,33 @@ bool gfx_snow_load(void) {
   return true;
 }
 #include "../snow_draw.inc"
+static vita2d_texture *fastfood_pages[2];
+static unsigned fastfood_loaded;
+void gfx_fastfood_free(void) {
+  while(fastfood_loaded) vita2d_free_texture(fastfood_pages[--fastfood_loaded]);
+}
+bool gfx_fastfood_load(void) {
+  if(fastfood_loaded==fastfood_page_count)return true;
+  gfx_fastfood_free();
+  if(fastfood_page_count>COUNT(fastfood_pages))return false;
+  for(unsigned i=0;i<fastfood_page_count;i++){
+    char path[128];snprintf(path,sizeof path,"app0:fastfood/%s.png",fastfood_page_files[i]);
+    vita2d_texture *p=load_png(path);
+    if(!p){gfx_fastfood_free();return false;}
+    vita2d_texture_set_filters(p, SCE_GXM_TEXTURE_FILTER_LINEAR, SCE_GXM_TEXTURE_FILTER_LINEAR);
+    fastfood_pages[fastfood_loaded++]=p;
+  }
+  return true;
+}
+#include "../fastfood_draw.inc"
+#define BATTLE_TEXTURE vita2d_texture *
+#define BATTLE_AVAILABLE battle_blend_ready()
+#define BATTLE_FREE(tex) vita2d_free_texture(tex)
+#define BATTLE_LOAD(path,target) ((*(target)=load_png(path))!=NULL)
+#define BATTLE_DRAW(tex,...) draw_tex(tex,__VA_ARGS__)
+#define BATTLE_DIRECTORY "app0:battle"
+#define BATTLE_EXTENSION ".png"
+#include "../battle_textures.inc"
 
 const SceneArt *gfx_art(const char *name){
   if(!scene_v.scene)return NULL;

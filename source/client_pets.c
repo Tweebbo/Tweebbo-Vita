@@ -1,3 +1,4 @@
+#include "language.h"
 #include "client_pets.h"
 #include "client_ui.h"
 #include "pets.h"
@@ -47,7 +48,7 @@ void client_pets_action(int command,int arg) {
   if(command==SPECIES){P.preview.kind=(P.preview.kind+arg+pet_kind_count)%pet_kind_count;P.preview.breed=P.preview.color=0;return;}
   if(command==BREED){P.preview.breed=(P.preview.breed+arg+k->breeds)%k->breeds;return;}
   if(command==COLOR){P.preview.color=(P.preview.color+arg+k->color_count)%k->color_count;return;}
-  if(command==NAME){client_ui_edit("Pet name (2 to 16 letters)",P.name,name_done);return;}
+  if(command==NAME){client_ui_edit(TR("Pet name (2 to 16 letters)"),P.name,name_done);return;}
   if(command==BUY){if(*P.name && W.credits>=(u32)pet_price)panel(CONFIRM);return;}
   if(command==CONFIRM_BUY){
     if(*P.name && W.credits>=(u32)pet_price)send(json_pack("{s:s,s:i,s:i,s:i,s:s}","action","adopt","kind",P.preview.kind,"breed",P.preview.breed,"color",P.preview.color,"name",P.name));
@@ -84,26 +85,26 @@ void client_pets_update(void) {
 }
 void client_pets_draw(float x,float y,float w) {
   char text[128];
-  if(!net_online()){client_ui_paragraph("Connect to the hotel to see your pets.",x+10,y+40,w-20,3,0x18272a);return;}
+  if(!net_online()){client_ui_paragraph(TR("Connect to the hotel to see your pets."),x+10,y+40,w-20,3,0x18272a);return;}
   bool ready=!P.pending;
   if(P.panel==LIST) {
-    client_ui_button(x+8,y+29,142,25,"Adopt a pet",ready?NEW:0,0);
-    client_ui_button(x+156,y+29,146,25,"Refresh",REFRESH,0);
+    client_ui_button(x+8,y+29,142,25,TR("Adopt a pet"),ready?NEW:0,0);
+    client_ui_button(x+156,y+29,146,25,TR("Refresh"),REFRESH,0);
     int n=(int)json_array_size(P.rows),pages=(n+3)/4;if(pages<1)pages=1;if(P.page<0)P.page=0;if(P.page>=pages)P.page=pages-1;
     for(int row=0;row<4 && P.page*4+row<n;row++) {
       json_t *v=json_array_get(P.rows,P.page*4+row);
       snprintf(text,sizeof text,"%s - %s",string(v,"name"),*string(v,"room")?"In a room":"With you");
       client_ui_button(x+8,y+65+row*28,w-16,26,text,SELECT,number(v,"id"));
     }
-    if(!n)client_ui_paragraph("Adopt a companion and bring them to your room.",x+10,y+80,w-20,3,0x26373a);
-    client_ui_button(x+8,y+188,80,24,"Previous",P.page?PAGE:0,-1);client_ui_button(x+w-88,y+188,80,24,"Next",P.page+1<pages?PAGE:0,1);return;
+    if(!n)client_ui_paragraph(TR("Adopt a companion and bring them to your room."),x+10,y+80,w-20,3,0x26373a);
+    client_ui_button(x+8,y+188,80,24,TR("Previous"),P.page?PAGE:0,-1);client_ui_button(x+w-88,y+188,80,24,TR("Next"),P.page+1<pages?PAGE:0,1);return;
   }
-  client_ui_button(x+w-88,y+28,80,23,"Back",BACK,0);
+  client_ui_button(x+w-88,y+28,80,23,TR("Back"),BACK,0);
   if(P.panel==ADOPT || P.panel==CONFIRM) {
     pet_draw(&P.preview,now_ms(),x+248,y+110,1);
     if(P.panel==CONFIRM) {
-      snprintf(text,sizeof text,"Adopt %s for %d credits?",P.name,pet_price);client_ui_paragraph(text,x+10,y+65,186,4,0x18272a);
-      client_ui_button(x+8,y+188,w-16,26,P.pending?"Adopting...":"Confirm adoption",ready?CONFIRM_BUY:0,0);return;
+      snprintf(text,sizeof text,TR("Adopt %s for %d credits?"),P.name,pet_price);client_ui_paragraph(text,x+10,y+65,186,4,0x18272a);
+      client_ui_button(x+8,y+188,w-16,26,P.pending?TR("Adopting..."):TR("Confirm adoption"),ready?CONFIRM_BUY:0,0);return;
     }
     const PetKind *k=&pet_kinds[P.preview.kind];
     const char *labels[]={k->name,"Coat","Color"};int commands[]={SPECIES,BREED,COLOR};
@@ -113,16 +114,16 @@ void client_pets_draw(float x,float y,float w) {
       client_ui_label(text,x+40,y+63+i*29,132,0x18272a);
       client_ui_button(x+174,y+58+i*29,26,24,">",ready?commands[i]:0,1);
     }
-    client_ui_field(x+8,y+151,w-16,26,P.name,"Name your pet",ready?NAME:0,0);
-    snprintf(text,sizeof text,"Adopt - %d credits",pet_price);client_ui_button(x+8,y+188,w-16,26,text,ready&&*P.name&&W.credits>=(u32)pet_price?BUY:0,0);return;
+    client_ui_field(x+8,y+151,w-16,26,P.name,TR("Name your pet"),ready?NAME:0,0);
+    snprintf(text,sizeof text,TR("Adopt - %d credits"),pet_price);client_ui_button(x+8,y+188,w-16,26,text,ready&&*P.name&&W.credits>=(u32)pet_price?BUY:0,0);return;
   }
-  json_t *pet=selected();if(!pet){client_ui_label("This pet is no longer available.",x+10,y+65,w-20,0x26373a);return;}
+  json_t *pet=selected();if(!pet){client_ui_label(TR("This pet is no longer available."),x+10,y+65,w-20,0x26373a);return;}
   client_ui_label(string(pet,"name"),x+10,y+32,w-110,0x18272a);
   static const char *keys[]={"hunger","thirst","energy","happiness"},*labels[]={"Fullness","Water","Energy","Mood"};
   for(int i=0;i<4;i++){int value=number(pet,keys[i]);if(i<2)value=100-value;snprintf(text,sizeof text,"%s: %d%%",labels[i],value);client_ui_label(text,x+10,y+62+i*19,w-20,0x26373a);}
   const char *room=string(pet,"room");
-  if(!*room)client_ui_button(x+8,y+175,w-16,28,"Place near me",ready&&world_can_decorate()?PLACE:0,0);
-  else if(strcmp(public_slug(room),public_slug(W.slug)))client_ui_button(x+8,y+175,w-16,28,"Visit room",VISIT,0);
+  if(!*room)client_ui_button(x+8,y+175,w-16,28,TR("Place near me"),ready&&world_can_decorate()?PLACE:0,0);
+  else if(strcmp(public_slug(room),public_slug(W.slug)))client_ui_button(x+8,y+175,w-16,28,TR("Visit room"),VISIT,0);
   else {
     static const char *actions[]={"Follow","Stay","Sit","Sleep","Play","Feed","Water","Pick up"};
     for(int i=0;i<8;i++)client_ui_button(x+8+(i%4)*74,y+151+(i/4)*30,70,26,actions[i],ready?COMMAND:0,i);
