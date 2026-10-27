@@ -82,12 +82,17 @@ static int drinks(const FurniDef *d,int *ids) {
   }return n;
 }
 static const char *drink_label(int id) {for(int i=0;i<drink_name_count;i++)if(drink_names[i].id==id)return drink_names[i].name;return "Drink";}
+/** Walkable furniture with states (dance floors): the owner switches it (room.rs use_item). */
+static bool floor_states(const FurniDef *d) {
+  for(int i=0;i<floor_switch_count;i++)if(floor_switches[i]==d->id)return true;
+  return false;
+}
 static const char *use_label(const FurniDef *d,const Item *it) {
   if(!d || d->casino)return NULL;
   if(d->flags&DEF_TELEPORTER)return "Enter teleporter";
   if(d->flags&DEF_LAY)return "Lie down";
   if(d->kind==KIND_SIT)return "Sit on furniture";
-  if(d->kind==KIND_FLOOR)return "Walk here";
+  if(d->kind==KIND_FLOOR)return W.room_owner && net_online() && floor_states(d)?(d->states>2?"Change state":it->state?"Turn off / close":"Turn on / open"):"Walk here";
   if(d->kind==KIND_DICE)return it->state==7?"Rolling...":"Roll dice";
   if(W.room_owner && (d->kind==KIND_TOGGLE || (d->kind==KIND_WALL && d->states>1)))return d->states>2?"Change state":it->state?"Turn off / close":"Turn on / open";
   return NULL;

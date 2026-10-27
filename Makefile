@@ -9,6 +9,8 @@ TITLE_ID ?= TWEE00001
 APP_NAME ?= Tweebbo
 
 APP_VERSION := $(shell cat VERSION)
+# Vita's two-component metadata stores 1.4.1 as 01.41; the in-game updater uses VERSION.
+SFO_VERSION := $(shell awk -F. '{printf "%02d.%02d", $$1, $$2 * 10 + $$3}' VERSION)
 # The hotel the client plays on (set by build.sh: tweebbo.lol, or a LAN hotel for showcases).
 TWEEBBO_SERVER ?= $(error Set TWEEBBO_SERVER, e.g. ws://192.168.1.20:8096 (use ./build.sh))
 CFLAGS  := -std=gnu11 -O2 -Wall -ffunction-sections -fdata-sections -fwrapv -fno-strict-aliasing -I vendor/quickjs -DCONFIG_VERSION='"2026-06-04"' \
@@ -76,10 +78,10 @@ $(BUILD)/$(TARGET).elf: $(OBJ)
 romfs/furni.pak: $(wildcard romfs/furni/*.png)
 	python3 tools/pack-furni.py
 
-out/$(TARGET).vpk: $(BUILD)/$(TARGET).elf $(SCE_SYS) romfs/furni.pak $(wildcard romfs/gfx/*.png) $(wildcard romfs/spaces/*) $(wildcard romfs/snow/*) $(wildcard romfs/fastfood/*) $(wildcard romfs/battle/*) $(wildcard romfs/lang/*) tools/pack-vpk.py
+out/$(TARGET).vpk: $(BUILD)/$(TARGET).elf $(SCE_SYS) romfs/furni.pak $(wildcard romfs/gfx/*.png) $(wildcard romfs/spaces/*) $(wildcard romfs/snow/*) $(wildcard romfs/fastfood/*) $(wildcard romfs/battle/*) $(wildcard romfs/lang/*) tools/pack-vpk.py Makefile
 	vita-elf-create $(BUILD)/$(TARGET).elf $(BUILD)/$(TARGET).velf
 	vita-make-fself -c $(BUILD)/$(TARGET).velf $(BUILD)/eboot.bin
-	vita-mksfoex -s TITLE_ID=$(TITLE_ID) "$(APP_NAME)" $(BUILD)/param.sfo
+	vita-mksfoex -s TITLE_ID=$(TITLE_ID) -s APP_VER=$(SFO_VERSION) -s VERSION=$(SFO_VERSION) "$(APP_NAME)" $(BUILD)/param.sfo
 	@mkdir -p out
 	python3 tools/pack-vpk.py $@ $(BUILD)/param.sfo $(BUILD)/eboot.bin
 	@ls -la $@

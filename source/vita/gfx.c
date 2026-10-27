@@ -172,6 +172,53 @@ static void pak_open(void) {
   pak.count = (int)count;
 }
 
+/* vita2d's additive mode blends ONE + ONE, so it ignores the source alpha that the browser
+   ('lighter') and the 3DS (SRC_ALPHA + ONE) apply. Additive art is premultiplied once when its
+   texture loads and the tint alpha is folded into the colour, which gives the same result;
+   without it the transparent glow of a disco ball or a dragon lamp shows as a solid block.
+   No texture region of the current export is shared by an additive and a normal sprite. */
+static void premultiply(vita2d_texture *t, int x, int y, int w, int h) {
+  if (!t) return;
+  u8 *px = vita2d_texture_get_datap(t);
+  unsigned stride = vita2d_texture_get_stride(t);
+  int tw = (int)vita2d_texture_get_width(t), th = (int)vita2d_texture_get_height(t);
+  if (x < 0 || y < 0 || x + w > tw || y + h > th) return;
+  for (int yy = y; yy < y + h; yy++) {
+    u8 *row = px + (size_t)yy * stride + (size_t)x * 4;
+    for (int xx = 0; xx < w; xx++, row += 4) {
+      unsigned a = row[3];
+      if (a == 255) continue;
+      for (int k = 0; k < 3; k++) row[k] = (u8)((row[k] * a + 127) / 255);
+    }
+  }
+}
+
+static u32 additive_tint(u32 color) {
+  u32 a = color >> 24, out = color & 0xff000000u;
+  for (int k = 0; k < 24; k += 8) out |= (((color >> k) & 255) * a / 255) << k;
+  return out;
+}
+
+static void premultiply_furni(u16 def, u16 page, vita2d_texture *t) {
+  /* Variants share their parts' rectangles: premultiply each one only once. */
+  static u32 done[65536];
+  memset(done, 0, sizeof done);
+  int used = 0;
+  int lo = 0, hi = furni_variant_count;
+  while (lo < hi) { int mid = (lo + hi) / 2; if (furni_variants[mid].def < def) lo = mid + 1; else hi = mid; }
+  for (int i = lo; i < furni_variant_count && furni_variants[i].def == def; i++)
+    for (int j = 0; j < furni_variants[i].count; j++) {
+      const FurniPart *p = &furni_variants[i].parts[j];
+      if (!(p->flags & PART_ADD) || p->page != page) continue;
+      u32 key = ((u32)p->x << 16 | p->y) + 1, slot = key * 2654435761u >> 16;
+      while (done[slot] && done[slot] != key) slot = (slot + 1) & 65535;
+      if (done[slot] || used == 60000) continue;
+      done[slot] = key;
+      used++;
+      premultiply(t, p->x, p->y, p->w, p->h);
+    }
+}
+
 static vita2d_texture *furni_blob(u16 def, u16 page) {
   pak_open();
   if (!pak.f || !pak.idx) return NULL;
@@ -191,6 +238,7 @@ static vita2d_texture *furni_blob(u16 def, u16 page) {
       vita2d_texture *t = decode_png(buf, pak.idx[mid].size);
       vita2d_texture_set_alloc_memblock_type(SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW);
       free(buf);
+      premultiply_furni(def, page, t);
       return t;
     }
     if (pak.idx[mid].key < key) lo = mid + 1; else hi = mid - 1;
@@ -386,7 +434,7 @@ void gfx_furni(u16 def, const FurniPart *part, float x, float y, float scale, u3
     pend_push(def);
     return;
   }
-  draw_tex(t, part->x, part->y, part->w, part->h, x, y, scale, scale, false, color);
+  draw_tex(t, part->x, part->y, part->w, part->h, x, y, scale, scale, false, additive ? additive_tint(color) : color);
 }
 
 void gfx_furni_preload(u16 def) {
@@ -463,6 +511,10 @@ const Scene *gfx_scene(const char *model) {
     scene_v.tex[i] = load_png(path);
     if (!scene_v.tex[i]) return NULL;
   }
+  for (int i = 0; i < want->count; i++) {
+    const SceneSprite *sp = &want->sprites[i];
+    if (sp->additive && sp->page < want->pages && sp->page < 4) premultiply(scene_v.tex[sp->page], sp->sx, sp->sy, sp->w, sp->h);
+  }
   scene_v.scene = want;
   scene_v.pages = want->pages;
   return want;
@@ -472,7 +524,7 @@ void gfx_scene_sprite(const SceneSprite *s, float x, float y, float zoom, u8 alp
   if (!scene_v.scene || s->page >= scene_v.pages) return;
   if (s->additive) gfx_additive(true);
   draw_tex(scene_v.tex[s->page], s->sx, s->sy, s->w, s->h, x, y, zoom * s->dw / (float)s->w, zoom * s->dh / (float)s->h,
-           false, ((u32)alpha << 24) | 0xffffff);
+           false, s->additive ? additive_tint(((u32)alpha << 24) | 0xffffff) : ((u32)alpha << 24) | 0xffffff);
   if (s->additive) gfx_additive(false);
 }
 
