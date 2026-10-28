@@ -48,6 +48,7 @@ enum { EDIT_CHAT, EDIT_NAME, EDIT_PASSWORD, EDIT_SEARCH, EDIT_TITLE, EDIT_FEATUR
 enum { DELETE_ROOM=99, ALERT_CLOSE=100 };
 #define CAMERA 31
 #define FEEDBACK 32
+#define GOPENGUIN 37
 #define DOORBELL 33
 #define FASTFOOD 34
 #define BATTLE 35
@@ -1410,6 +1411,7 @@ void client_ui_draw(void) {
   else if (U.panel==FEEDBACK) title = "Suggestion box";
   else if (U.panel==DOORBELL) title = "Doorbell";
   else if(U.panel==LANGUAGE)title=TR("Choose your language");
+  else if(U.panel==GOPENGUIN)title="GoPenguin";
   else title = TR(titles[U.panel]);
   window_chrome(x,y,w,h,title,true);
   char line[384];
@@ -1420,13 +1422,18 @@ void client_ui_draw(void) {
     button(x+8,y+188,w-16,26,TR("Back"),OPEN,HELP);
   }
   else if(U.panel==MORE) {
-    static const char *names[]={"People","Catalogue","Inventory","Room furniture","Friends","Games","Pets","Help",DONATE_LABEL};
-    static const int commands[]={OPEN,OPEN_SHOP,OPEN_SHOP,OPEN_SHOP,OPEN,OPEN,OPEN,OPEN,OPEN};
-    static const int args[]={PEOPLE,SHOP_CATALOGUE,SHOP_INVENTORY,SHOP_ROOM,SOCIAL,GAMES,PETS,HELP,SUPPORT};
-    for(int i=0;i<COUNT(names);i++)button(x+8+(i%2)*148,y+28+(i/2)*34,146,28,TR(names[i]),commands[i],args[i]);
-    button(x+8,y+192,146,24,TR("Snow Storm"),OPEN,SNOW);
-    button(x+156,y+192,146,24,TR("Music / sound"),OPEN,MUSIC);
-    if(W.room_owner)button(x+156,y+164,146,28,TR("Room settings"),OPEN,SETTINGS);
+    static const char *names[]={"People","Catalogue","Inventory","Room furniture","Friends","Games","Pets","Help",DONATE_LABEL,"GoPenguin","Snow Storm","Music / sound"};
+    static const int commands[]={OPEN,OPEN_SHOP,OPEN_SHOP,OPEN_SHOP,OPEN,OPEN,OPEN,OPEN,OPEN,OPEN,OPEN,OPEN};
+    static const int args[]={PEOPLE,SHOP_CATALOGUE,SHOP_INVENTORY,SHOP_ROOM,SOCIAL,GAMES,PETS,HELP,SUPPORT,GOPENGUIN,SNOW,MUSIC};
+    const float cell=(w-16)/3;
+    for(int i=0;i<COUNT(names);i++)button(x+8+(i%3)*cell,y+28+(i/3)*34,cell-3,28,TR(names[i]),commands[i],args[i]);
+    if(W.room_owner)button(x+8,y+174,w-16,28,TR("Room settings"),OPEN,SETTINGS);
+  }
+  else if(U.panel==GOPENGUIN){
+    client_ui_paragraph(TR("GoPenguin is available! Explore the island on your computer or phone."),x+12,y+38,w-24,4,CL_INK);
+    label("gopenguin.lol",x+12,y+100,w-24,CL_INK);
+    client_ui_paragraph(TR("Tweebbo stays right here. Your hotel character and belongings are kept."),x+12,y+128,w-24,3,CL_INK);
+    button(x+8,y+184,w-16,28,TR("Back"),OPEN,MORE);
   }
   else if(U.panel==SETTINGS) {
     bool owner=W.room_owner && net_online() && !strcmp(U.settings_room,W.slug);

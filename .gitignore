@@ -17,3 +17,14 @@ romfs/fastfood/
 romfs/battle/
 romfs/lang/
 romfs/spaces/
+
+.env*
+*.key
+*.pem
+*.log
+*.md
+!README.md
+!RELEASE.md
+!docs/GUIDE.md
+!docs/RELEASE.md
+!docs/ONLINE.md
