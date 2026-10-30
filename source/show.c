@@ -2,6 +2,8 @@
 #include "battle.h"
 // Shared room renderer for the Switch and Vita clients.
 #include "show.h"
+#include "update.h"
+#include "language.h"
 #include "igloo.h"
 #include "client_ui.h"
 #include "feedback.h"
@@ -27,6 +29,7 @@
 #include "net.h"
 #include "proto.h"
 #include "world.h"
+#include "world_activity.h"
 
 #define TW 64
 #define TH 32
@@ -88,6 +91,7 @@ static float scr_y(float wy) { return roundf(V.cam_y * V.zoom) + wy * V.zoom; }
 
 bool show_confirm_quit(const char *key, u64 now) {
   static u64 asked;
+  if (update_state() == UPD_DOWNLOADING) { asked = 0; show_toast(TR("Keep Tweebbo open until the update is finished."), now); return false; }
   if (asked && now - asked < 3000) return true;
   asked = now;
   char text[64];
@@ -365,12 +369,22 @@ static void draw_ent_badge(const Ent *e, u64 now) {
   iso(px, py, &sx, &sy);
   PoseInfo p = pose_of(e, now, ent_moving(e, now));
   int device = e->device ? e->device : ((e->flags & FLAG_3DS) ? DEVICE_3DS : 0);
+  float raise=0;
+  if(now<e->typing_until) {
+    float k=V.zoom<1?1:V.zoom;
+    float bx=scr_x(sx+p.dx),by=scr_y(sy+HALF_H+p.dy-p.anchor_y+8-p.lift);
+    fill_rect(bx-13*k,by-16*k,26*k,14*k,rgba(0x202020,255));
+    fill_rect(bx-12*k,by-15*k,24*k,12*k,rgba(0xffffff,255));
+    for(int dot=-1;dot<=1;dot++)fill_rect(bx+(dot*6-1)*k,by-10*k,2*k,2*k,rgba(0x202020,255));
+    fill_rect(bx-3*k,by-3*k,k,3*k,rgba(0x202020,255));
+    raise=28*k;
+  }
   if (device) {
     int bw = 12, bh = 13;
     device_badge_size(device, &bw, &bh);
     float k = V.zoom < 1 ? 1 : V.zoom;
     float bx = scr_x(sx + p.dx), by = scr_y(sy + HALF_H + p.dy - p.anchor_y + 16 - p.lift);
-    device_badge(device, bx - bw * 0.5f * k, by - bh * k, k);
+    device_badge(device, bx - bw * 0.5f * k, by - bh * k-raise, k);
   }
 }
 
@@ -544,16 +558,16 @@ static const Item *nearby_furniture(void) {
 }
 /** Human verb for the contextual prompt, like the 3DS player's card. */
 static void interaction_label(const Item *it, const FurniDef *d, char *out, size_t cap) {
-  const char *name = d && d->name && *d->name ? d->name : "furniture";
-  if (d->casino) snprintf(out, cap, "Play %s", name);
-  else if (d->drinks && *d->drinks) snprintf(out, cap, "Get a drink");
-  else if (d->kind == KIND_DICE) snprintf(out, cap, "Roll the dice");
-  else if (d->flags & DEF_TELEPORTER) snprintf(out, cap, "Enter the teleporter");
-  else if (d->flags & DEF_GATE) snprintf(out, cap, it->state ? "Close the gate" : "Open the gate");
-  else if (d->kind == KIND_TOGGLE) snprintf(out, cap, it->state ? "Switch off %s" : "Switch on %s", name);
-  else if (d->flags & DEF_LAY) snprintf(out, cap, "Lie down");
-  else if (d->kind == KIND_SIT) snprintf(out, cap, "Sit on %s", name);
-  else snprintf(out, cap, "Use %s", name);
+  const char *name = TR(d && d->name && *d->name ? d->name : "furniture");
+  if (d->casino) snprintf(out, cap, TR("Play %s"), name);
+  else if (d->drinks && *d->drinks) snprintf(out, cap, "%s", TR("Get a drink"));
+  else if (d->kind == KIND_DICE) snprintf(out, cap, "%s", TR("Roll the dice"));
+  else if (d->flags & DEF_TELEPORTER) snprintf(out, cap, "%s", TR("Enter the teleporter"));
+  else if (d->flags & DEF_GATE) snprintf(out, cap, "%s", TR(it->state ? "Close the gate" : "Open the gate"));
+  else if (d->kind == KIND_TOGGLE) snprintf(out, cap, TR(it->state ? "Switch off %s" : "Switch on %s"), name);
+  else if (d->flags & DEF_LAY) snprintf(out, cap, "%s", TR("Lie down"));
+  else if (d->kind == KIND_SIT) snprintf(out, cap, TR("Sit on %s"), name);
+  else snprintf(out, cap, TR("Use %s"), name);
 }
 
 
@@ -587,6 +601,13 @@ static void draw_ui(u64 now) {
 }
 
 // ------------------------------------------------------------------ frame
+
+bool show_animation_active(u64 now) {
+  if (world_animation_active(now) || pool_room() || !V.snapped || toast_until > now ||
+      client_ui_animation_active() || fastfood_active() || battle_active() || client_snow_playing()) return true;
+  for (int i = 0; i < BUBBLE_MAX; i++) if (V.chat[i].used) return true;
+  return false;
+}
 
 void show_frame(u64 now) {
   gfx_filter(false);

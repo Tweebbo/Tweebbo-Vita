@@ -1,14 +1,19 @@
-# Tweebbo for PlayStation Vita 1.4.2
+# Tweebbo for PlayStation Vita 1.4.4
 
-Play in the same hotel as PC, mobile, Nintendo 3DS and Nintendo Switch.
+Optional update: keep playing on your current version and update whenever convenient.
+You do not need to install this immediately.
 
-- Football: Game Balls, goals and scoreboards from the Football catalogue page. Walk into the ball to kick it, step towards it to dribble, and a ball that stops in a goal adds a point to that team's scoreboards.
-- Glowing furniture such as the disco ball and the dragon lamps no longer shows solid blocks of colour.
-- Room owners can switch on dance floors, disco balls and other walk-on furniture with lights from the furniture window.
-- More now includes GoPenguin availability and its website. Your Tweebbo hotel and saved character stay in place.
+- Adds support for smaller future downloads using unchanged installed game files.
+- Versions through 1.4.3 first need this complete bridge update.
+- Shows small/full download sizes and preparation progress.
+- Offers an explicit full download when a small update cannot be used.
+- Preserves the previous file if replacement fails, along with saved characters
+  and settings. Normal exit waits until active update work finishes.
 
-Install `tweebbo.vpk` with VitaShell. Existing players can download the update inside Tweebbo and install it with VitaShell.
+The in-game updater saves a verified VPK in ux0:data/Tweebbo/tweebbo.vpk. Open VitaShell and install that file; your installed app is retained while downloading and preparing it.
 
-Tweebbo remains in development. Vita3K exercised the furniture rendering; physical-device performance is not certified.
+Updating still needs storage space for the complete reconstructed VPK.
+Host integrity/resume/atomic replacement tests and native builds pass. Physical
+console installation, suspend/power loss and performance acceptance remain pending.
 
 Full changelog: https://tweebbo.lol/changelog

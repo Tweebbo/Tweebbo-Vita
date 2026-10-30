@@ -4,6 +4,7 @@
 void client_ui_init(void);
 void client_ui_update(void);
 void client_ui_draw(void);
+bool client_ui_animation_active(void);
 bool client_ui_action(int action);
 bool client_ui_move(int dx, int dy);
 bool client_ui_tap(float x, float y);

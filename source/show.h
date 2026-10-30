@@ -11,6 +11,7 @@ void show_set_offline_key(const char *key);
 
 void show_start(u64 now);
 void show_frame(u64 now);
+bool show_animation_active(u64 now);
 /** Room entered (world.c on_room): picks the background and clears the bubbles. */
 void show_room_changed(u64 now);
 /** Chat bubble over a player (world.c on_chat). */

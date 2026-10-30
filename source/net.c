@@ -6,6 +6,7 @@
 #include "proto.h"
 #include "sim.h"
 #include "world.h"
+#include "job_signal.h"
 
 #ifdef __3DS__
 #include <3ds.h>
@@ -94,6 +95,7 @@ typedef struct {
 static struct {
   bool started, offline, quit, doorbell;
   Mutex mu;
+  JobSignal http_wake;
   ThreadHandle thread, http_thread, food_thread;
   bool food_enabled;
   u32 food_gen;
@@ -305,7 +307,7 @@ static void http_thread(void *arg) {
     lock(&N.mu);
     for (int i = 0; i < MAX_HTTP && !job; i++) if (N.http[i].queued && !N.http[i].done) job = &N.http[i];
     unlock(&N.mu);
-    if (!job) { sleep_ms(30); continue; }
+    if (!job) { job_signal_wait(&N.http_wake); continue; }
     HttpResult res;
     if (!conn_ready()) {
       // The network thread sets up the sockets; without them the request fails with a clear message.
@@ -346,7 +348,7 @@ static void start_offline_room(const char *slug, u64 now) {
 static void start_offline(u64 now) { start_offline_room("lobby", now); }
 
 void net_start(u64 now) {
-  if (!N.started) mutex_init(&N.mu);
+  if (!N.started) { mutex_init(&N.mu); job_signal_init(&N.http_wake); }
   N.started = true;
   N.quit = false;
   if (N.session_server[0]) snprintf(N.server, sizeof N.server, "%s", N.session_server);
@@ -392,6 +394,7 @@ void net_stop(void) {
   lock(&N.mu);
   N.quit = true;
   unlock(&N.mu);
+  job_signal_send(&N.http_wake);
   join(N.thread);
   join(N.http_thread);
   join(N.food_thread);
@@ -542,7 +545,7 @@ void net_use_token(const char *token) {
   W.in_room = false;
 }
 
-int net_http(const char *method, const char *path, const char *json, bool auth) {
+static int queue_http(const char *method, const char *path, const char *json, bool auth, bool prod) {
   if (N.offline) return 0;
   int id = 0;
   lock(&N.mu);
@@ -557,19 +560,21 @@ int net_http(const char *method, const char *path, const char *json, bool auth) 
     j->endpoint = N.ep;
     j->json = json ? strdup(json) : NULL;
     j->auth = auth;
+    j->prod = prod;
     j->queued = true;
     break;
   }
   unlock(&N.mu);
+  if (id) job_signal_send(&N.http_wake);
   return id;
 }
 
+int net_http(const char *method, const char *path, const char *json, bool auth) {
+  return queue_http(method, path, json, auth, false);
+}
+
 int net_check_prod(void) {
-  int id = net_http("GET", "/healthz", NULL, false);
-  lock(&N.mu);
-  for (int i = 0; i < MAX_HTTP; i++) if (N.http[i].id == id) N.http[i].prod = true;
-  unlock(&N.mu);
-  return id;
+  return queue_http("GET", "/healthz", NULL, false, true);
 }
 
 bool net_http_result(int id, HttpResult *out) {
@@ -593,6 +598,25 @@ bool net_http_result(int id, HttpResult *out) {
 
 void send_walk(int x, int y) { SEND(w_begin(&w, C_WALK); w_u8(&w, (u32)x); w_u8(&w, (u32)y)); }
 void send_chat(const char *text) { SEND(w_begin(&w, C_CHAT); w_str(&w, text)); }
+void typing_input(const char *text) {
+  static char previous[401];
+  static u64 edited, sent;
+  static u32 entity;
+  static bool active;
+  u64 now=now_ms();
+  if(entity!=W.me || !W.in_room || !net_online()) {
+    active=false;previous[0]=0;edited=sent=0;entity=W.me;
+  }
+  const char *value=text?text:"";
+  if(strcmp(previous,value)) {snprintf(previous,sizeof previous,"%s",value);edited=now;}
+  bool nonblank=false;
+  for(const char *p=value;*p;p++)if(*p!=' '){nonblank=true;break;}
+  bool next=text&&nonblank&&W.in_room&&net_online()&&now-edited<5000;
+  if(next!=active || (next&&now-sent>=2000)) {
+    SEND(w_begin(&w,C_TYPING);w_u8(&w,next?1:0));
+    active=next;sent=now;
+  }
+}
 void send_gesture(int kind) { SEND(w_begin(&w, C_GESTURE); w_u8(&w, (u32)kind)); }
 void send_use(u32 item) { SEND(w_begin(&w, C_USE); w_var(&w, item)); }
 void send_use_op(u32 item,u8 op) { SEND(w_begin(&w, C_USE); w_var(&w, item); w_u8(&w, op)); }

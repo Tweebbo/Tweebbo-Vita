@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <psp2/ctrl.h>
+#include <psp2/display.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
 #include <psp2/kernel/processmgr.h>
@@ -20,6 +21,7 @@
 #include "world.h"
 #include "update.h"
 #include "input_repeat.h"
+#include "frame_pacing.h"
 
 #ifdef TWEEBBO_GAMES_TEST
 #if !TWEEBBO_LAN_ONLY
@@ -161,11 +163,15 @@ int main(void) {
   bool first_frame = true;
   bool touching = false;
   u64 last_beat = now_ms();
+  FramePacing pacing = {0};
   while (running) {
     SceCtrlData pad;
     memset(&pad, 0, sizeof pad);
     sceCtrlPeekBufferPositive(0, &pad, 1);
     input(&pad, prev, &running);
+    bool input_active = pad.buttons || pad.buttons != prev ||
+      abs((int)pad.lx - 128) > 48 || abs((int)pad.ly - 128) > 48 ||
+      abs((int)pad.rx - 128) > 64 || abs((int)pad.ry - 128) > 64;
     prev = pad.buttons;
 
     SceTouchData touch;
@@ -173,6 +179,7 @@ int main(void) {
     bool touched = sceTouchPeek(SCE_TOUCH_PORT_FRONT, &touch, 1) > 0 && touch.reportNum > 0;
     if (touched && !touching)
       show_tap(touch.report[0].x / 4.0f, touch.report[0].y / 4.0f); /* 1920×1088 → 480×272 canvas */
+    input_active |= touched || touching;
     touching = touched;
 
     u64 now = now_ms();
@@ -202,6 +209,12 @@ int main(void) {
       test_step++;
     }
 #endif
+    if (show_quit_requested()) running = false;
+    if (!running) break;
+    if (!frame_pacing_draw(&pacing, now, input_active || show_animation_active(now))) {
+      sceDisplayWaitVblankStart();
+      continue;
+    }
     gfx_frame(); /* load furniture queued by the previous frame, outside the draw pass */
     gfx_begin();
     show_frame(now_ms());

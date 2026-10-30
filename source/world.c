@@ -229,6 +229,12 @@ void world_handle(const u8 *data, int len) {
       remember_device(id, 0);
       break;
     }
+    case S_TYPING: {
+      Ent *e=world_ent((u32)r_var(&r));
+      u8 active=r_u8(&r);
+      if(e&&!r.err)e->typing_until=active?now+8000:0;
+      break;
+    }
     case S_ACTION:
       // Expressions and dance styles: id, action, dance style, remaining milliseconds.
       for (int n = (int)r_var(&r); n > 0 && !r.err; n--) {

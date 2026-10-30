@@ -36,3 +36,9 @@ void update_forget_dismiss(void);
 int version_cmp(const char *a, const char *b);
 /** Path of the running NRO (empty on Vita). */
 void update_set_launch_path(const char *argv0);
+/** Current preparation phase and selected/full transfer sizes. */
+const char *update_status(void);
+bool update_full_fallback(void);
+bool update_small(void);
+long update_download_bytes(void);
+long update_full_bytes(void);

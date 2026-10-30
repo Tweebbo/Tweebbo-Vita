@@ -276,6 +276,7 @@ static bool pill(const char *base, const char *state, float x, float y, float w,
 /** One pad hint as a small classic button (the original button.b capsule, dark Verdana-like
  *  label, the pad glyph inside), like the hotel's own buttons; tappable when `cmd` is set. */
 static float hint_chip(const char *key, const char *text, float x, float y, int cmd, int arg) {
+  text=TR(text);
   float gw = pad_glyph_width(key), w = gw + 6 + text_width(text, 11) + 14, h = 22;
   int i = U.count;
   hotspot(x, y, w, h, cmd, arg);
@@ -296,7 +297,7 @@ static void room_hints(float margin) {
 #endif
   float start = margin + 8, x = start, y = margin + 38, max = SCREEN_W - margin - 8;
   for (int i = 0; i < COUNT(keys); i++) {
-    float w = pad_glyph_width(keys[i]) + 6 + text_width(labels[i], 11) + 14;
+    float w = pad_glyph_width(keys[i]) + 6 + text_width(TR(labels[i]), 11) + 14;
     if (x > start && x + w > max) { x = start; y += 26; }
     int cmd = !strcmp(labels[i], "Rooms") || !strcmp(labels[i], "More") ? OPEN : 0;
     int arg = !strcmp(labels[i], "Rooms") ? ROOMS : MORE;
@@ -508,13 +509,16 @@ static void update_draw(float x, float y, float w) {
   } else if (st == UPD_AVAILABLE) {
     snprintf(text, sizeof text, TR("Tweebbo %s is available."), update_version());
     label(text, x + 12, y + 34, w - 24, CL_INK);
-    client_ui_paragraph(update_notes()[0] ? update_notes() : TR("Your character, rooms and purchases stay the same."), x + 12, y + 60, w - 24, 6, CL_INK);
-    client_ui_paragraph(TR("Update now? The download continues if the connection drops."), x + 12, y + 150, w - 24, 2, CL_MUTED);
+    if(update_small())snprintf(text,sizeof text,TR("Download: %.1f MB (full: %.1f MB)"),update_download_bytes()/1000000.0,update_full_bytes()/1000000.0);
+    else snprintf(text,sizeof text,TR("Download: %.1f MB"),update_download_bytes()/1000000.0);
+    label(text,x+12,y+55,w-24,CL_MUTED);
+    client_ui_paragraph(update_notes()[0] ? update_notes() : TR("Your character, rooms and purchases stay the same."), x + 12, y + 78, w - 24, 4, CL_INK);
+    client_ui_paragraph(TR("Optional update. Keep playing and install later if you prefer."), x + 12, y + 150, w - 24, 2, CL_MUTED);
     button(x + 8, y + 188, 140, 26, TR("Later"), UPDATE_LATER, 0);
-    button(x + 156, y + 188, 146, 26, TR("Update now"), UPDATE_INSTALL, 0);
+    button(x + 156, y + 188, 146, 26, TR(update_full_fallback()?"Full download":update_small()?"Small update":"Update now"), UPDATE_INSTALL, 0);
   } else if (st == UPD_DOWNLOADING) {
     int pct = (int)(update_progress() * 100);
-    snprintf(text, sizeof text, TR("Downloading Tweebbo %s... %d%%"), update_version(), pct);
+    snprintf(text, sizeof text, "%s... %d%%", TR(update_status()[0]?update_status():"Downloading update"), pct);
     label(text, x + 12, y + 40, w - 24, CL_INK);
     fill_round(x + 12, y + 70, w - 24, 14, 7, color(CL_SHADE));
     if (pct > 0) fill_round(x + 12, y + 70, (w - 24) * pct / 100.0f, 14, 7, color(CL_ONLINE));
@@ -522,13 +526,13 @@ static void update_draw(float x, float y, float w) {
     client_ui_paragraph(TR("The release is checked against its SHA-256 before installing."), x + 12, y + 150, w - 24, 2, CL_MUTED);
   } else if (st == UPD_INSTALLED) {
 #if TWEEBBO_DEVICE == 3
-    label(TR("Update downloaded"), x + 12, y + 36, w - 24, CL_ONLINE);
+    label(TR("Update downloaded"), x + 12, y + 36, w - 24, CL_INK);
     client_ui_paragraph(TR("Open VitaShell and install this file. Your character and rooms stay the same."), x + 12, y + 66, w - 24, 3, CL_INK);
     snprintf(text, sizeof text, "%s", update_installed_path());
     client_ui_paragraph(text, x + 12, y + 106, w - 24, 3, CL_MUTED);
     button(x + 8, y + 188, w - 16, 26, TR("Close"), UPDATE_CLOSE, 0);
 #else
-    label(TR("Update installed"), x + 12, y + 36, w - 24, CL_ONLINE);
+    label(TR("Update installed"), x + 12, y + 36, w - 24, CL_INK);
     client_ui_paragraph(TR("Close Tweebbo and open it again from the Homebrew Menu to use the new version. Your character and rooms stay the same."), x + 12, y + 66, w - 24, 5, CL_INK);
     button(x + 8, y + 188, 140, 26, TR("Later"), UPDATE_CLOSE, 0);
     button(x + 156, y + 188, 146, 26, TR("Restart now"), UPDATE_RESTART, 0);
@@ -538,7 +542,7 @@ static void update_draw(float x, float y, float w) {
     client_ui_paragraph(update_error()[0] ? update_error() : TR("The update could not be installed."), x + 12, y + 64, w - 24, 5, CL_INK);
     client_ui_paragraph(TR("A partial download is kept: searching again resumes it."), x + 12, y + 150, w - 24, 2, CL_MUTED);
     button(x + 8, y + 188, 140, 26, TR("Later"), UPDATE_LATER, 0);
-    button(x + 156, y + 188, 146, 26, TR("Try again"), UPDATE_CHECK, 0);
+    button(x + 156, y + 188, 146, 26, TR(update_full_fallback()?"Full download":"Try again"), update_full_fallback()?UPDATE_INSTALL:UPDATE_CHECK, 0);
   } else if (st == UPD_LATEST) {
     snprintf(text, sizeof text, TR("You have the latest version (%s)."), update_current());
     label(text, x + 12, y + 40, w - 24, CL_INK);
@@ -1195,6 +1199,8 @@ void client_ui_chat(u32 eid,const char *text) {
   }
 }
 void client_ui_edit_secret(const char *title,bool (*submit)(const char *)){client_ui_edit(title,"",submit);U.secret=true;}
+bool client_ui_animation_active(void) { return U.panel != CLOSED || U.alert; }
+
 void client_ui_update(void) {
   tw_language_update();
   feedback_poll();doorbell_poll();
@@ -1346,6 +1352,7 @@ static void keyboard(float x,float y,float w) {
 }
 
 void client_ui_draw(void) {
+  typing_input(U.panel==KEYBOARD&&U.edit==EDIT_CHAT?U.input:NULL);
   U.count=0;
   if(net_state()==NET_REPLACED) {
     float w=300,x=(SCREEN_W-w)/2,y=(SCREEN_H-150)/2;

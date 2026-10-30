@@ -13,7 +13,7 @@
 #include <string.h>
 
 enum { SLOT, ROULETTE, BLACKJACK, CRASH, POKER, VIDEO, DASH, NO_GAME };
-enum { TAB=6000, BET, CHOICE, VALUE, HOLD, PLAY, SECOND, DOUBLE, RELOAD, LEAVE, CONFIRM_LEAVE, RULE_PAGE, NUMBER };
+enum { TAB=6000, BET, CHOICE, VALUE, HOLD, PLAY, SECOND, DOUBLE, RELOAD, LEAVE, CONFIRM_LEAVE, RULE_PAGE, NUMBER, SPLIT };
 static const char *keys[]={"slot","roulette","blackjack","crash","poker","videopoker","dash"};
 static const char *names[]={"Slots","Roulette","Blackjack","Crash","Casino Hold'em","Video Poker","VIP Dash","Casino"};
 static const char *slots[]={"Star Treasure","Lucky Sevens","Gem Ways","Candy Tumble","Coin Rush"};
@@ -131,7 +131,7 @@ void client_casino_receive(const char *text) {
     if(!strcmp(type,"crash") && C.kind==CRASH && identifier(j,"item")==C.item) {
       replace(&C.round,json_object_get(j,"round"));C.received=now_ms();
       answered=(C.pending==8 && mine()) || (C.pending==9 && (json_is_number(json_object_get(mine(),"out")) || !strcmp(phase(),"crashed") || !strcmp(phase(),"idle")));
-    } else if((!strcmp(type,"bj") && C.kind==BLACKJACK && C.pending>=4 && C.pending<=7) ||
+    } else if((!strcmp(type,"bj") && C.kind==BLACKJACK && ((C.pending>=4 && C.pending<=7)||C.pending==20)) ||
               (!strcmp(type,"poker") && C.kind==POKER && C.pending>=11 && C.pending<=13)) {
       json_t *hand=json_object_get(j,"hand");if(json_is_object(hand)){replace(&C.state,hand);answered=true;}
     } else if((!strcmp(type,"slot") && C.kind==SLOT && C.pending==2) ||
@@ -172,6 +172,7 @@ void client_casino_action(int cmd,int arg) {
     if(C.kind==CRASH)send_action(8,C.bet,0,0);
     if(C.kind==DASH){int b=0;while(b<C.count-1 && C.bets[b]!=C.bet)b++;send_action(playing()?17:16,playing()?0:C.risk,playing()?0:b,0);}
   } else if(cmd==DOUBLE && C.kind==BLACKJACK && playing() && json_array_size(json_object_get(C.state,"player"))==2 && W.credits>=(u32)num(C.state,"bet"))send_action(7,0,0,0);
+  else if(cmd==SPLIT && C.kind==BLACKJACK && playing() && json_is_true(json_object_get(C.state,"canSplit")) && W.credits>=(u32)num(C.state,"bet"))send_action(20,0,0,0);
 }
 static bool sprite(const char *key,float x,float y,float maxw,float maxh) {
   for(int i=0;i<ui_sprite_count;i++)if(!strcmp(ui_sprites[i].name,key)) {
@@ -234,7 +235,15 @@ static void table(float x,float y,float w) {
     client_ui_label(TR("Dealer"),x+8,y+58,65,0x18272a);cards(json_object_get(C.state,"dealer"),2,x+78,y+54,w-86);
     if(C.kind==POKER){client_ui_label(TR("Table"),x+8,y+102,65,0x18272a);cards(json_object_get(C.state,"board"),5,x+78,y+98,w-86);}
     else {snprintf(line,sizeof line,TR("Dealer %d / You %d"),num(C.state,"dealerTotal"),num(C.state,"total"));client_ui_label(line,x+8,y+105,w-16,0x18272a);}
-    client_ui_label(TR("You"),x+8,y+146,65,0x18272a);cards(json_object_get(C.state,"player"),2,x+78,y+142,w-86);
+    json_t *hands=json_object_get(C.state,"hands");
+    if(C.kind==BLACKJACK && json_array_size(hands)>1) {
+      for(int i=0;i<2;i++) {
+        json_t *side=json_array_get(hands,i);
+        snprintf(line,sizeof line,TR("Hand %d: %d"),i+1,num(side,"total"));
+        client_ui_label(line,x+8+i*w/2,y+127,w/2-16,playing()&&num(C.state,"activeHand")==i?0x825300:0x18272a);
+        cards(json_object_get(side,"player"),2,x+8+i*w/2,y+143,w/2-16);
+      }
+    } else { client_ui_label(TR("You"),x+8,y+146,65,0x18272a);cards(json_object_get(C.state,"player"),2,x+78,y+142,w-86); }
   } else if(C.kind==VIDEO) {
     cards(json_object_get(C.state,"cards"),5,x+12,y+62,w-24);
     float pitch=(w-16)/5;
@@ -348,13 +357,15 @@ void client_casino_draw(float x,float y,float w) {
       else snprintf(line,sizeof line,"%s",TR("Choose a stake in hotel credits."));
       client_ui_paragraph(line,x+10,y+115,w-20,3,0x18272a);
     }
-    const char *primary=C.kind==SLOT?(C.free_left?"Free spin":"Spin"):C.kind==ROULETTE || C.kind==CRASH?"Place bet":C.kind==DASH?(live?"Step":"Start"):C.kind==VIDEO?(live?"Draw":"Deal"):live?(C.kind==POKER?"Call":"Hit"):"Deal";
-    float action_pitch=(w-16)/(C.kind==BLACKJACK?3:2);
+    const char *primary=C.kind==SLOT?(C.free_left?"Free spin":"Spin"):C.kind==ROULETTE || C.kind==CRASH?"Place bet":C.kind==DASH?(live?"Step":"Start"):C.kind==VIDEO?(live?"Draw":"Deal"):live?(C.kind==POKER?"Call":"Hit"):C.kind==BLACKJACK&&C.state?"Deal again":"Deal";
+    float action_pitch=(w-16)/(C.kind==BLACKJACK?4:2);
     client_ui_button(x+8,y+161,action_pitch-4,26,primary,can_play()?PLAY:0,0);
     if(C.kind==BLACKJACK || C.kind==POKER || C.kind==CRASH || C.kind==DASH)client_ui_button(x+8+action_pitch,y+161,action_pitch-4,26,C.kind==BLACKJACK?TR("Stand"):C.kind==POKER?TR("Fold"):TR("Cash out"),can_second()?SECOND:0,0);
     if(C.kind==BLACKJACK)client_ui_button(x+8+action_pitch*2,y+161,action_pitch-4,26,TR("Double"),ok&&live&&json_array_size(json_object_get(C.state,"player"))==2&&W.credits>=(u32)num(C.state,"bet")?DOUBLE:0,0);
+    if(C.kind==BLACKJACK)client_ui_button(x+8+action_pitch*3,y+161,action_pitch-4,26,TR("Split"),ok&&live&&json_is_true(json_object_get(C.state,"canSplit"))&&W.credits>=(u32)num(C.state,"bet")?SPLIT:0,0);
   }
   x=frame_x;w=frame_w;
-  client_ui_button(x+8,y+193,142,23,TR("Reload state"),net_online()&&!C.pending?RELOAD:0,0);
-  client_ui_button(x+156,y+193,w-164,23,TR("Leave game"),LEAVE,0);
+  float footer_width=(w-24)/2;
+  client_ui_button(x+8,y+193,footer_width,23,TR("Reload state"),net_online()&&!C.pending?RELOAD:0,0);
+  client_ui_button(x+16+footer_width,y+193,footer_width,23,TR("Leave game"),LEAVE,0);
 }
