@@ -1,19 +1,16 @@
-# Tweebbo for PlayStation Vita 1.4.4
+# Tweebbo for PlayStation Vita 1.4.5
 
-Optional update: keep playing on your current version and update whenever convenient.
-You do not need to install this immediately.
+Optional update. Keep playing and update whenever convenient.
 
-- Adds support for smaller future downloads using unchanged installed game files.
-- Versions through 1.4.3 first need this complete bridge update.
-- Shows small/full download sizes and preparation progress.
-- Offers an explicit full download when a small update cannot be used.
-- Preserves the previous file if replacement fails, along with saved characters
-  and settings. Normal exit waits until active update work finishes.
+- L/R zoom through three room views: overview, standard and character close-up.
+- Touch a player or furniture to open its action menu. Floor taps still walk, and window controls keep priority.
+- Typing uses a rounded classic speech bubble with a pointed tail.
+- Balls and other sliding furniture move smoothly between tiles. Footballs rebound from barriers and recheck the next tile during a kick.
+- Blackjack allows splitting equal-value cards, including 10 + King and Jack + Queen.
+- Smaller update downloads remain available for supported installed versions, with the complete VPK as fallback.
 
-The in-game updater saves a verified VPK in ux0:data/Tweebbo/tweebbo.vpk. Open VitaShell and install that file; your installed app is retained while downloading and preparing it.
+The updater prepares a verified VPK at `ux0:data/Tweebbo/tweebbo.vpk`. Install it with VitaShell and keep your saved data. Reconstruction still needs space for the complete VPK.
 
-Updating still needs storage space for the complete reconstructed VPK.
-Host integrity/resume/atomic replacement tests and native builds pass. Physical
-console installation, suspend/power loss and performance acceptance remain pending.
+Native builds, host UI, collision, protocol and updater integrity tests pass. Physical-console installation, touch accuracy and performance acceptance remain pending.
 
 Full changelog: https://tweebbo.lol/changelog

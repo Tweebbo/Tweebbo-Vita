@@ -29,11 +29,13 @@ You need a PlayStation Vita with homebrew enabled (HENkaku or Enso).
 | Circle | Open rooms, close or cancel |
 | Triangle / Square | Chat / wave |
 | D-Pad | Walk, navigate lists or move furniture while placing |
-| L / R | Zoom; turn pages in windows; rotate or change height while placing |
+| L / R | Zoom out / in: whole room, standard, close-up; turn pages in windows; rotate or change height while placing |
 | Right stick up/down | Open Tools in the room; change catalogue section or Navigator page |
 | START | Quit |
 
 The room shows a button legend in the top-left corner. In Chat, L/R shows older/newer messages. Support is in the bottom toolbar and Tools.
+
+Tap the floor to walk, a player to open their menu, or furniture to open its actions. The bottom toolbar and windows also respond to touch.
 
 ## Progress and updates
 

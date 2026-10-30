@@ -60,6 +60,7 @@ typedef struct {
 
 static struct {
   float cam_x, cam_y, zoom;
+  int zoom_level;
   bool snapped;
   const RoomBackground *bg;
   const Scene *scene;
@@ -72,10 +73,7 @@ static struct {
   bool quit;
   /* One-shot checkpoints: the log pins the stage that faults the GPU. */
   bool log_room_info, log_stage_world, log_stage_frame;
-/* Zoom 1 on the half-resolution canvas is the classic 64×32 tile shown at 2× on screen:
-   the whole lobby and everyone in it fit, which is what the cross-play photo needs.
-   R zooms in to 2 for close-ups. */
-} V = {.zoom = 1, .platform = "Console", .hello = "Hello from the hotel!", .offline_key = "Select"};
+} V = {.zoom = 1, .zoom_level = 1, .platform = "Console", .hello = "Hello from the hotel!", .offline_key = "Select"};
 
 /* Short notice pill shown under the banner (hotel notices, kicks). */
 static char toast[128];
@@ -119,22 +117,28 @@ void show_start(u64 now) {
 // ------------------------------------------------------------------ camera
 
 static void camera(u64 now) {
+  if (V.zoom_level == 0) {
+    float fit = fminf((SCREEN_W-client_ui_room_left()-16) / fmaxf(1,V.bx1-V.bx0),
+                      (SCREEN_H-64) / fmaxf(1,V.by1-V.by0));
+    V.zoom = .5f;
+    while (V.zoom > fit && V.zoom > 1.f/64) V.zoom *= .5f;
+  } else V.zoom = V.zoom_level == 1 ? 1 : 2;
   float lw = SCREEN_W / V.zoom, tx, ty;
   float left = client_ui_room_left() / V.zoom;
   float visible = lw - left;
   Ent *me = world_ent(W.me);
   const BuildGhost *ghost=client_shop_ghost();
-  if(ghost->on) {
+  if(ghost->on && V.zoom_level != 0) {
     float sx,sy;iso(ghost->x,ghost->y,&sx,&sy);
     tx=left+visible*.5f-sx;ty=SCREEN_H/V.zoom*.60f-sy+ghost->z;
     V.cam_x+=(tx-V.cam_x)*.12f;V.cam_y+=(ty-V.cam_y)*.12f;return;
   }
   float activity_x,activity_y;
-  if(pool_camera(&activity_x,&activity_y,now)){
+  if(V.zoom_level != 0 && pool_camera(&activity_x,&activity_y,now)){
     tx=left+visible/2-activity_x;ty=SCREEN_H/V.zoom*.5f-activity_y;
     V.cam_x+=(tx-V.cam_x)*.12f;V.cam_y+=(ty-V.cam_y)*.12f;return;
   }
-  if (!me) {
+  if (!me || V.zoom_level == 0) {
     tx = left + visible / 2 - (V.bx0 + V.bx1) / 2;
     ty = lw * .5f / (SCREEN_W / (float)SCREEN_H) - (V.by0 + V.by1) / 2;
   } else {
@@ -143,6 +147,13 @@ static void camera(u64 now) {
     iso(px, py, &sx, &sy);
     tx = left + visible * .5f - sx;
     ty = (SCREEN_H / V.zoom) * .60f - sy + ent_height(me, now);
+    if (V.zoom_level == 2) {
+      // Keep the face and typing bubble below the fixed top controls.
+      ty = (SCREEN_H / V.zoom) * .95f - sy + ent_height(me, now);
+      if (!V.snapped) { V.cam_x=tx; V.cam_y=ty; V.snapped=true; }
+      V.cam_x+=(tx-V.cam_x)*.12f; V.cam_y+=(ty-V.cam_y)*.12f;
+      return;
+    }
     if (V.bx1 - V.bx0 >= visible) tx = fminf(left - V.bx0, fmaxf(lw - V.bx1, tx));
     else tx = left + visible / 2 - (V.bx0 + V.bx1) / 2;
     float lh = SCREEN_H / V.zoom;
@@ -306,12 +317,13 @@ static int by_depth(const void *a, const void *b) {
   return x->seq - y->seq;
 }
 
-static void draw_item_part(const Item *it, const FurniPart *p) {
-  float sx, sy;
-  iso(it->x, it->y, &sx, &sy);
+static void draw_item_part(const Item *it, const FurniPart *p, u64 now) {
+  float sx, sy, x, y, z;
+  item_pos(it, now, &x, &y, &z);
+  iso(x, y, &sx, &sy);
   bool add = p->flags & PART_ADD;
   if (add) gfx_additive(true);
-  gfx_furni(it->def, p, scr_x(sx + p->ox), scr_y(sy + p->oy - it->z), V.zoom, rgba(0xffffff, p->alpha));
+  gfx_furni(it->def, p, scr_x(sx + p->ox), scr_y(sy + p->oy - z), V.zoom, rgba(0xffffff, p->alpha));
   if (add) gfx_additive(false);
 }
 
@@ -373,10 +385,11 @@ static void draw_ent_badge(const Ent *e, u64 now) {
   if(now<e->typing_until) {
     float k=V.zoom<1?1:V.zoom;
     float bx=scr_x(sx+p.dx),by=scr_y(sy+HALF_H+p.dy-p.anchor_y+8-p.lift);
-    fill_rect(bx-13*k,by-16*k,26*k,14*k,rgba(0x202020,255));
-    fill_rect(bx-12*k,by-15*k,24*k,12*k,rgba(0xffffff,255));
-    for(int dot=-1;dot<=1;dot++)fill_rect(bx+(dot*6-1)*k,by-10*k,2*k,2*k,rgba(0x202020,255));
-    fill_rect(bx-3*k,by-3*k,k,3*k,rgba(0x202020,255));
+    fill_round(bx-15*k,by-20*k,30*k,18*k,4*k,rgba(0x202020,255));
+    fill_triangle(bx+5*k,by-5*k,bx+15*k,by-8*k,bx+17*k,by+3*k,rgba(0x202020,255));
+    fill_round(bx-14*k,by-19*k,28*k,16*k,3*k,rgba(0xffffff,255));
+    fill_triangle(bx+7*k,by-5*k,bx+14*k,by-6*k,bx+15*k,by+k,rgba(0xffffff,255));
+    for(int dot=-1;dot<=1;dot++)fill_circle(bx+dot*7*k,by-11*k,1.5f*k,rgba(0x202020,255));
     raise=28*k;
   }
   if (device) {
@@ -507,10 +520,11 @@ void show_room_changed(u64 now) {
     }
   }
   if (V.scene) {
+    V.bx0 = V.by0 = 1e9f; V.bx1 = V.by1 = -1e9f;
     for (int i = 0; i < V.scene->count; i++) {
       const SceneSprite *sp = &V.scene->sprites[i];
-      if (!sp->background) continue;
-      V.bx0 = sp->x; V.by0 = sp->y; V.bx1 = sp->x + sp->dw; V.by1 = sp->y + sp->dh;
+      V.bx0=fminf(V.bx0,sp->x); V.by0=fminf(V.by0,sp->y);
+      V.bx1=fmaxf(V.bx1,sp->x+sp->dw); V.by1=fmaxf(V.by1,sp->y+sp->dh);
     }
   } else if (V.bg) {
     V.bx0 = V.bg->x; V.by0 = V.bg->y; V.bx1 = V.bg->x + V.bg->w; V.by1 = V.bg->y + V.bg->h;
@@ -674,13 +688,14 @@ void show_frame(u64 now) {
     if (!v) continue;
     for (int k = 0; k < v->count && n < COUNT(list); k++) {
       const FurniPart *p = &v->parts[k];
-      float sx, sy;
-      iso(it->x, it->y, &sx, &sy);
-      float left = scr_x(sx + p->ox), top = scr_y(sy + p->oy - it->z);
+      float sx, sy, ix, iy, iz;
+      item_pos(it, now, &ix, &iy, &iz);
+      iso(ix, iy, &sx, &sy);
+      float left = scr_x(sx + p->ox), top = scr_y(sy + p->oy - iz);
       if (left >= SCREEN_W || top >= SCREEN_H || left + p->w * V.zoom <= 0 || top + p->h * V.zoom <= 0) continue;
       bool shadow = p->flags & PART_SHADOW;
       if (shadow && it->z % 32) continue;
-      list[n] = (Drawable){shadow ? -10000 : it->x + it->y + p->depth + it->z / 1024.0f, n, it, p, NULL, NULL};
+      list[n] = (Drawable){shadow ? -10000 : ix + iy + p->depth + iz / 1024.0f, n, it, p, NULL, NULL};
       n++;
     }
   }
@@ -715,7 +730,7 @@ void show_frame(u64 now) {
       pet_draw(list[i].pet,now,scr_x(sx),scr_y(sy),V.zoom);
     }
     else if (list[i].layer) gfx_scene_sprite(list[i].layer, scr_x(list[i].layer->x), scr_y(list[i].layer->y), V.zoom, list[i].layer->alpha);
-    else draw_item_part(list[i].item, list[i].part);
+    else draw_item_part(list[i].item, list[i].part, now);
   }
   if (V.log_stage_world) { V.log_stage_world = false; dbg_log("room: world drawn (%d pieces)", n); }
   const BuildGhost *ghost=client_shop_ghost();
@@ -757,6 +772,34 @@ void show_walk(int dx, int dy) {
   if (x >= 0 && y >= 0 && x < W.w && y < W.h && world_tile(x, y)) send_walk(x, y);
 }
 
+typedef struct { u32 person, furniture; } RoomTarget;
+
+static RoomTarget room_target(float x, float y, u64 now) {
+  float best=-1e9f;
+  u32 person=0, furniture=0;
+  for(int i=0;i<MAX_ENTS;i++) {
+    const Ent *e=&W.ents[i];
+    if(!e->used || pool_hides(e))continue;
+    float px,py,ex,ey;ent_pos(e,now,&px,&py);iso(px,py,&ex,&ey);
+    PoseInfo p=pose_of(e,now,ent_moving(e,now));
+    ex=scr_x(ex+p.dx);ey=scr_y(ey+HALF_H+p.dy-p.lift);
+    float depth=px+py+.002f+p.depth+ent_height(e,now)/1024;
+    if(x>=ex-22*V.zoom && x<=ex+22*V.zoom && y>=ey-p.anchor_y*V.zoom && y<=ey && depth>=best){person=e->id;furniture=0;best=depth;}
+  }
+  for(int i=0;i<MAX_ITEMS;i++) {
+    const Item *it=&W.items[i];if(!it->used)continue;
+    const FurniVariant *v=variant_frame(it->def,it->rot,it->state,furni_frame(it->def,it->state,now));
+    if(!v)continue;
+    float ix,iy,iz,ex,ey;item_pos(it,now,&ix,&iy,&iz);iso(ix,iy,&ex,&ey);
+    for(int j=0;j<v->count;j++) {
+      const FurniPart *p=&v->parts[j];if((p->flags&PART_SHADOW)||!p->alpha)continue;
+      float left=scr_x(ex+p->ox),top=scr_y(ey+p->oy-iz),depth=ix+iy+p->depth+iz/1024;
+      if(x>=left && x<left+p->w*V.zoom && y>=top && y<top+p->h*V.zoom && depth>=best){furniture=it->id;person=0;best=depth;}
+    }
+  }
+  return (RoomTarget){person,furniture};
+}
+
 void show_tap(float x, float y) {
   net_activity();
   if (client_ui_tap(x, y)) return;
@@ -766,17 +809,13 @@ void show_tap(float x, float y) {
       show_action(SHOW_OFFLINE);
     return;
   }
-  float sx = x / V.zoom - roundf(V.cam_x), sy = y / V.zoom - roundf(V.cam_y);
+  float sx = (x-roundf(V.cam_x*V.zoom))/V.zoom, sy = (y-roundf(V.cam_y*V.zoom))/V.zoom;
   int tx = (int)lroundf((sx / HALF_W + sy / HALF_H) / 2);
   int ty = (int)lroundf((sy / HALF_H - sx / HALF_W) / 2);
   if(client_shop_building()) {client_shop_tile(tx,ty);return;}
-  for(int i=0;i<MAX_ENTS;i++) {
-    const Ent *e=&W.ents[i];
-    if(!e->used || !feedback_receptionist(e->guest,W.model))continue;
-    float ex,ey;iso(e->x,e->y,&ex,&ey);
-    ex=scr_x(ex);ey=scr_y(ey+HALF_H-ent_height(e,now_ms()));
-    if(x>=ex-22*V.zoom && x<=ex+22*V.zoom && y>=ey-90*V.zoom && y<=ey-15*V.zoom){client_ui_person(e->id);return;}
-  }
+  RoomTarget target=room_target(x,y,now_ms());
+  if(target.person){client_ui_person(target.person);return;}
+  if(target.furniture){client_ui_inspect(target.furniture);return;}
   if (tx >= 0 && ty >= 0 && tx < W.w && ty < W.h && world_tile(tx, ty)) send_walk(tx, ty);
 }
 
@@ -845,8 +884,8 @@ void show_action(int action) {
       break;
     case SHOW_X: send_gesture(GESTURE_WAVE); break;
     case SHOW_Y: send_chat(V.hello); break;
-    case SHOW_L: V.zoom = 1; V.snapped = false; break;
-    case SHOW_R: V.zoom = 2; V.snapped = false; break;
+    case SHOW_L: if(V.zoom_level>0)V.zoom_level--; V.snapped = false; camera(now_ms()); break;
+    case SHOW_R: if(V.zoom_level<2)V.zoom_level++; V.snapped = false; camera(now_ms()); break;
     case SHOW_OFFLINE: {
       static char hotel[128];
       if (!strcmp(net_server(), "offline")) net_set_server(hotel[0] ? hotel : DEFAULT_SERVER);
