@@ -53,7 +53,7 @@ typedef struct {
   bool used;
   char name[24], text[104];
   u32 color;
-  float wx, head_wy, y;
+  float wx, mouth_wy, y;
   int row;
   u64 t0;
 } Bubble;
@@ -375,24 +375,28 @@ static void draw_ent(const Ent *e, u64 now) {
               scr_x(roundf(sx) + p.dx - ANCHOR_X), scr_y(roundf(sy + HALF_H) + p.dy - p.anchor_y - p.lift), V.zoom, 255);
 }
 
-static void draw_ent_badge(const Ent *e, u64 now) {
+static void draw_ent_overlay(const Ent *e, u64 now, bool typing) {
   float px, py, sx, sy;
   ent_pos(e, now, &px, &py);
   iso(px, py, &sx, &sy);
   PoseInfo p = pose_of(e, now, ent_moving(e, now));
   int device = e->device ? e->device : ((e->flags & FLAG_3DS) ? DEVICE_3DS : 0);
   float raise=0;
-  if(now<e->typing_until) {
+  if(typing&&now<e->typing_until) {
     float k=V.zoom<1?1:V.zoom;
-    float bx=scr_x(sx+p.dx),by=scr_y(sy+HALF_H+p.dy-p.anchor_y+8-p.lift);
+    float mouth_x=scr_x(sx+p.dx),mouth_y=scr_y(sy+HALF_H+p.dy-p.anchor_y+42-p.lift);
+    int facing=body_dir(e,ent_moving(e,now));if(p.pose==POSE_LAY)facing=facing==0?4:2;
+    int side=facing>=4&&facing<=6?-1:1;
+    float offset=12*V.zoom+18*k;
+    if(mouth_x+side*offset-15*k<0 || mouth_x+side*offset+15*k>SCREEN_W)side=-side;
+    float bx=roundf(mouth_x+side*offset),by=roundf(mouth_y-3*k),tail=-side;
     fill_round(bx-15*k,by-20*k,30*k,18*k,4*k,rgba(0x202020,255));
-    fill_triangle(bx+5*k,by-5*k,bx+15*k,by-8*k,bx+17*k,by+3*k,rgba(0x202020,255));
+    fill_triangle(bx+tail*5*k,by-5*k,bx+tail*15*k,by-8*k,bx+tail*17*k,by+3*k,rgba(0x202020,255));
     fill_round(bx-14*k,by-19*k,28*k,16*k,3*k,rgba(0xffffff,255));
-    fill_triangle(bx+7*k,by-5*k,bx+14*k,by-6*k,bx+15*k,by+k,rgba(0xffffff,255));
+    fill_triangle(bx+tail*7*k,by-5*k,bx+tail*14*k,by-6*k,bx+tail*15*k,by+k,rgba(0xffffff,255));
     for(int dot=-1;dot<=1;dot++)fill_circle(bx+dot*7*k,by-11*k,1.5f*k,rgba(0x202020,255));
-    raise=28*k;
   }
-  if (device) {
+  if (!typing&&device) {
     int bw = 12, bh = 13;
     device_badge_size(device, &bw, &bh);
     float k = V.zoom < 1 ? 1 : V.zoom;
@@ -418,7 +422,7 @@ static void draw_bubbles(u64 now) {
     float cx = scr_x(b->wx);
     float t = (now - b->t0) / 220.0f;
     if (t < 1) {
-      float hy = scr_y(b->head_wy);
+      float hy = scr_y(b->mouth_wy);
       fill_circle(cx, hy + (b->y - hy) * t, 3.5f, rgba(b->color, 255));
     }
     char name[32], text[112];
@@ -461,8 +465,9 @@ static void bubble_add(u32 eid, const char *text, u64 now) {
   snprintf(b->name, sizeof b->name, "%s", e->name);
   snprintf(b->text, sizeof b->text, "%s", text);
   b->color = c;
-  b->wx = wx;
-  b->head_wy = wy + HALF_H - 70 - ent_height(e, now);
+  PoseInfo p=pose_of(e,now,ent_moving(e,now));
+  b->wx = wx+p.dx;
+  b->mouth_wy = wy + HALF_H + p.dy - p.anchor_y + 42 - p.lift;
   b->y = NAN;
   b->t0 = now;
   V.last_shift = now;
@@ -753,8 +758,10 @@ void show_frame(u64 now) {
   if(client_camera_capturing()){client_camera_scene();V.last_frame=now;return;}
   /* Like 3DS, device markers overlay furniture and foreground room layers. */
   for (int i = 0; i < MAX_ENTS; i++)
-    if (W.ents[i].used && !pool_hides(&W.ents[i])) draw_ent_badge(&W.ents[i], now);
+    if (W.ents[i].used && !pool_hides(&W.ents[i])) draw_ent_overlay(&W.ents[i], now, false);
   pool_draw_room(now);
+  for (int i = 0; i < MAX_ENTS; i++)
+    if (W.ents[i].used && !pool_hides(&W.ents[i])) draw_ent_overlay(&W.ents[i], now, true);
   draw_bubbles(now);
   draw_ui(now);
   if (V.log_stage_frame) { V.log_stage_frame = false; dbg_log("room: first frame drawn"); }
