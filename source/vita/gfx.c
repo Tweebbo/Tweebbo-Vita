@@ -389,10 +389,11 @@ void gfx_pet(int palette,const PetPart *part,float x,float y,float scale,bool fl
 
 static vita2d_texture *furni_fetch(u16 def, u16 page) {
   FurniTex *slot = furni_slot(furni_cache,FURNI_CACHE,def,page);
-  if (!slot->used || slot->def!=def || slot->page!=page) {
+  if (furni_needs_load(slot,def,page,now_ms())) {
     furni_evict(slot);
     u32 bytes=0;
-    for(int i=0;i<furni_texture_count;i++)if(furni_textures[i].def==def && furni_textures[i].page==page)bytes=furni_textures[i].bytes;
+    /* The shared manifest may count 16-bit 3DS textures; Vita always allocates RGBA8. */
+    for(int i=0;i<furni_texture_count;i++)if(furni_textures[i].def==def && furni_textures[i].page==page)bytes=furni_textures[i].bytes*2;
     if(bytes>FURNI_BYTES)return NULL;
     while(furni_bytes+bytes>FURNI_BYTES) {
       FurniTex *oldest=furni_oldest(furni_cache,FURNI_CACHE,slot);
@@ -401,10 +402,12 @@ static vita2d_texture *furni_fetch(u16 def, u16 page) {
     }
     slot->tex = furni_blob(def, page);
     if(!slot->tex)dbg_log("furniture texture unavailable: %u page %u",def,page);
-    slot->bytes=slot->tex?bytes:0;furni_bytes+=slot->bytes;
+    slot->bytes=slot->tex?vita2d_texture_get_stride(slot->tex)*vita2d_texture_get_height(slot->tex):0;
+    furni_bytes+=slot->bytes;
     slot->def = def;
     slot->page = (u8)page;
     slot->used = true;
+    slot->retry_at = slot->tex ? 0 : now_ms() + 2000;
   }
   slot->stamp = ++furni_clock;
   return slot->tex;
