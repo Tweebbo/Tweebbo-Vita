@@ -7,7 +7,8 @@ tweebbo.vpk
 romfs/gfx/
 romfs/furni/
 romfs/classic/
-source/gen/
+source/gen/*
+!source/gen/classic_music.h
 __pycache__/
 romfs/furni.pak
 tools/emu-cache/

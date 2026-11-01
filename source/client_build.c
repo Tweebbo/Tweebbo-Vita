@@ -24,9 +24,13 @@ bool client_build_valid(BuildGhost *g) {
   const FurniDef *d=def_get(g->def);
   const Item *original=g->ignore?world_item(g->ignore):NULL;
   if (!W.in_room || !d || !world_can_decorate() || (g->ignore && (!original || !world_can_arrange(original)))) return false;
-  if (d->kind==KIND_WALL)
+  if (d->kind==KIND_WALL) {
+    int lo,hi;
+    bool ranged=furni_wall_range(g->def,(u8)g->rot,&lo,&hi);
     return world_tile(g->x,g->y) && !world_tile(g->x-(g->rot%2==0),g->y-(g->rot%2==1)) && g->z>=8 && g->z<=110
+      && (!ranged || (g->z>=lo && g->z<=hi))
       && !(g->rot%2==0 && g->x==W.door_x+1 && g->y==W.door_y);
+  }
   if (original) {
     int w,h;def_size(original->def,original->rot,&w,&h);
     for (int y=original->y;y<original->y+h;y++) for (int x=original->x;x<original->x+w;x++) {
@@ -65,4 +69,11 @@ void client_build_wall(BuildGhost *g, int step, bool nearest) {
     n++;
   }
   if(n) {best=(best+step+n)%n;g->x=slots[best].x;g->y=slots[best].y;g->rot=slots[best].rot;}
+}
+
+void client_build_wall_clamp(BuildGhost *g) {
+  int lo,hi;
+  if(!g->wall || !furni_wall_range(g->def,(u8)g->rot,&lo,&hi))return;
+  if(g->z<lo)g->z=lo;
+  if(g->z>hi)g->z=hi;
 }

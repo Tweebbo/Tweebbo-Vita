@@ -4,13 +4,14 @@
 #include <string.h>
 #include <stdio.h>
 static pthread_mutex_t mu=PTHREAD_MUTEX_INITIALIZER;
-static struct {s16 *data;size_t n;u64 cursor;int rate;bool loop;} voices[12];
+// 0-7 games and snow, 8-11 Trax, 12 classic previews, 13 interface sounds.
+static struct {s16 *data;size_t n;u64 cursor;int rate;bool loop;} voices[14];
 static bool muted;
 void audio_mix(s16 *out,int frames){
   pthread_mutex_lock(&mu);
   for(int f=0;f<frames;f++){
     int sum=0;
-    for(int c=0;c<12;c++){
+    for(int c=0;c<14;c++){
       if(!voices[c].data||!voices[c].n)continue;
       size_t index=voices[c].cursor/48000;
       if(index>=voices[c].n){if(voices[c].loop){voices[c].cursor%=voices[c].n*48000;index=voices[c].cursor/48000;}else continue;}
@@ -22,15 +23,15 @@ void audio_mix(s16 *out,int frames){
   }
   pthread_mutex_unlock(&mu);
 }
-void audio_stop(int c){if(c<0||c>=12)return;pthread_mutex_lock(&mu);free(voices[c].data);memset(&voices[c],0,sizeof voices[c]);pthread_mutex_unlock(&mu);}
-void audio_clear(void){for(int c=0;c<12;c++)audio_stop(c);}
+void audio_stop(int c){if(c<0||c>=14)return;pthread_mutex_lock(&mu);free(voices[c].data);memset(&voices[c],0,sizeof voices[c]);pthread_mutex_unlock(&mu);}
+void audio_clear(void){for(int c=0;c<14;c++)audio_stop(c);}
 bool audio_play(int c,const void *data,size_t n,int bits,int rate,bool loop,size_t skip){
-  if(c<0||c>=12||!data||!n||n>512*1024||skip>=n||(bits!=8&&bits!=16)||rate<8000||rate>48000)return false;
+  if(c<0||c>=14||!data||!n||n>512*1024||skip>=n||(bits!=8&&bits!=16)||rate<8000||rate>48000)return false;
   s16 *copy=malloc(n*sizeof *copy);if(!copy)return false;
   if(bits==16)memcpy(copy,data,n*2);else for(size_t i=0;i<n;i++)copy[i]=(s16)((const s8*)data)[i]*256;
   pthread_mutex_lock(&mu);free(voices[c].data);voices[c].data=copy;voices[c].n=n;voices[c].cursor=skip*48000;voices[c].rate=rate;voices[c].loop=loop;pthread_mutex_unlock(&mu);return true;
 }
-bool audio_busy(int c){if(c<0||c>=12)return false;pthread_mutex_lock(&mu);bool busy=voices[c].data&&(voices[c].loop||voices[c].cursor/48000<voices[c].n);pthread_mutex_unlock(&mu);return busy;}
+bool audio_busy(int c){if(c<0||c>=14)return false;pthread_mutex_lock(&mu);bool busy=voices[c].data&&(voices[c].loop||voices[c].cursor/48000<voices[c].n);pthread_mutex_unlock(&mu);return busy;}
 void audio_mute(bool value){pthread_mutex_lock(&mu);muted=value;pthread_mutex_unlock(&mu);}
 bool audio_muted(void){pthread_mutex_lock(&mu);bool value=muted;pthread_mutex_unlock(&mu);return value;}
 static const char *snow_names[]={"LS-miss","LS-throw","LS-hit-1","LS-hit-2","LS-hit-3","LS-walk-loop-1","LS-getsnowball","LS-C64-win-1","LS-C64-loose-1","LS-C64-draw-1"};

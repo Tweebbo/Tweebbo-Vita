@@ -1,6 +1,7 @@
 #include "language.h"
 #include "client_social.h"
 #include "client_ui.h"
+#include "client_music.h"
 #include "net.h"
 #include "world.h"
 #include "show.h"
@@ -16,7 +17,7 @@ static struct {
   int view, from, page, message_page, job, kind, confirm;
   u32 peer, job_peer, last_read, draft_peer;
   u64 next_poll;
-  bool enabled;
+  bool enabled, sent;
   size_t text_offset, next_text;
   json_t *contacts, *results, *messages;
   char status[160], query[80], draft[256];
@@ -29,6 +30,11 @@ static json_t *list(int view) {
 }
 static json_t *find(int view,u32 peer) {
   size_t i;json_t *v;json_array_foreach(list(view),i,v)if(id(v)==peer)return v;return NULL;
+}
+static int unread_messages(void) {
+  int n=0;size_t i;json_t *v;
+  json_array_foreach(list(FRIENDS),i,v)n+=(int)json_integer_value(json_object_get(v,"unread"));
+  return n;
 }
 bool client_social_blocked(u32 guest) {return find(BLOCKED,guest)!=NULL;}
 static void status(const char *s) {snprintf(F.status,sizeof F.status,"%s",s);}
@@ -63,6 +69,7 @@ static bool message_done(const char *s) {
   if(!*s || !find(FRIENDS,F.peer))return false;
   snprintf(F.draft,sizeof F.draft,"%s",s);
   F.draft_peer=F.peer;
+  F.sent=true;
   return act("message",s);
 }
 static void message_cancelled(const char *s) {snprintf(F.draft,sizeof F.draft,"%s",s);F.draft_peer=F.peer;}
@@ -91,7 +98,7 @@ void client_social_update(bool visible) {
   if(F.job && net_http_result(F.job,&r)) {
     F.job=0;json_t *j=r.body?json_loads(r.body,0,NULL):NULL;
     if(r.status==200 && j) {
-      if(F.kind==LOAD && json_is_object(j)) {json_decref(F.contacts);F.contacts=json_incref(j);}
+      if(F.kind==LOAD && json_is_object(j)) {int before=unread_messages();bool first=!F.contacts;json_decref(F.contacts);F.contacts=json_incref(j);if(!first && unread_messages()>before)client_music_ui_sound("message_new");}
       if(F.kind==FIND && json_is_array(j)) {json_decref(F.results);F.results=json_incref(j);status(json_array_size(j)?"":"No matching players.");}
       if(F.kind==MESSAGES && F.job_peer==F.peer && json_is_array(j)) {
         u32 selected=id(json_array_get(F.messages,json_array_size(F.messages)?json_array_size(F.messages)-1-F.message_page:0));
@@ -100,8 +107,8 @@ void client_social_update(bool visible) {
           size_t i;json_t *m;json_array_foreach(j,i,m)if(id(m)==selected){F.message_page=(int)(json_array_size(j)-1-i);break;}
         }
       }
-      if(F.kind==ACTION) {F.next_poll=0;F.draft[0]=0;status("Updated.");if(F.view==CONFIRM)view(FRIENDS);}
-    } else {const char *err=string(j,"error");status(*err?err:r.err[0]?r.err:"Could not load Friends. Try Refresh.");show_toast(F.status,now_ms());}
+      if(F.kind==ACTION) {if(F.sent)client_music_ui_sound("message_sent");F.sent=false;F.next_poll=0;F.draft[0]=0;status("Updated.");if(F.view==CONFIRM)view(FRIENDS);}
+    } else {F.sent=false;const char *err=string(j,"error");status(*err?err:r.err[0]?r.err:"Could not load Friends. Try Refresh.");show_toast(F.status,now_ms());}
     json_decref(j);free(r.body);if(visible)client_ui_changed();
     if(F.kind==LOAD && visible && F.view==CONVERSATION && find(FRIENDS,F.peer)) {
       char path[80];snprintf(path,sizeof path,"/api/social?peer=%u",F.peer);request(MESSAGES,"GET",path,NULL);

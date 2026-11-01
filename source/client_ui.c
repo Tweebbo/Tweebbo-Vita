@@ -1209,6 +1209,7 @@ void client_ui_update(void) {
   if(doorbell.guest&&doorbell.guest!=last_bell&&!U.panel){last_bell=doorbell.guest;open_panel(DOORBELL);}
   client_camera_update();
   client_identity_update();client_music_update();
+  if(W.credits_up){W.credits_up=false;client_music_ui_sound("cash");}
   if(U.panel==CHIPS || U.panel==SUPPORT)paylink_poll(now_ms());
   update_poll(now_ms());
   // Offer a published update at login, once, until the player picks Later. A newer

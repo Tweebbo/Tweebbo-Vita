@@ -30,6 +30,8 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as zf:
     zf.write("romfs/furni.pak", "furni.pak")
     for path in sorted(glob.glob("romfs/lang/*")):
         zf.write(path, "lang/" + os.path.basename(path))
+    for path in sorted(glob.glob("romfs/ui/*")):
+        zf.write(path, "ui/" + os.path.basename(path))
     for path in sorted(glob.glob("romfs/spaces/*")):
         zf.write(path, "spaces/" + os.path.basename(path))
 

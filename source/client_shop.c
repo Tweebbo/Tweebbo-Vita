@@ -133,12 +133,12 @@ static void start_build(u16 def, u32 id, bool moving) {
   Ent *me=world_ent(W.me);
   S.ghost.x=it?it->x:me?me->x:0;S.ghost.y=it?it->y:me?me->y:0;
   S.ghost.rot=it?it->rot:def_rotation(def,0);S.ghost.z=it?it->z:60;
-  if(S.ghost.wall)client_build_wall(&S.ghost,0,true);
+  if(S.ghost.wall){client_build_wall(&S.ghost,0,true);client_build_wall_clamp(&S.ghost);}
   S.ghost.ok=client_build_valid(&S.ghost);panel(BUILD);
 }
 static void rotate(int step) {
   if(S.pending)return;
-  if(S.ghost.wall) {S.ghost.z+=step*6;if(S.ghost.z<8)S.ghost.z=8;if(S.ghost.z>110)S.ghost.z=110;}
+  if(S.ghost.wall) {S.ghost.z+=step*6;if(S.ghost.z<8)S.ghost.z=8;if(S.ghost.z>110)S.ghost.z=110;client_build_wall_clamp(&S.ghost);}
   else {
     for(int i=1;i<=4;i++) {
       int r=(S.ghost.rot+step*i+16)%4;
@@ -281,7 +281,7 @@ void client_shop_update(void) {
 bool client_shop_move(int dx, int dy) {
   if(!client_shop_building())return false;
   if(S.pending)return true;
-  if(S.ghost.wall)client_build_wall(&S.ghost,dx+dy>0?1:-1,false);
+  if(S.ghost.wall){client_build_wall(&S.ghost,dx+dy>0?1:-1,false);client_build_wall_clamp(&S.ghost);}
   else {int x=S.ghost.x+dx,y=S.ghost.y+dy;if(x>=0 && y>=0 && x<W.w && y<W.h){S.ghost.x=x;S.ghost.y=y;}}
   S.status[0]=0;S.ghost.ok=client_build_valid(&S.ghost);return true;
 }
@@ -307,7 +307,7 @@ bool client_shop_key(int action) {
 void client_shop_tile(int x, int y) {
   if(!client_shop_building() || S.pending)return;
   S.ghost.x=x;S.ghost.y=y;
-  if(S.ghost.wall)client_build_wall(&S.ghost,0,true);
+  if(S.ghost.wall){client_build_wall(&S.ghost,0,true);client_build_wall_clamp(&S.ghost);}
   S.ghost.ok=client_build_valid(&S.ghost);
 }
 static void icon(u16 def, float x, float y) {
