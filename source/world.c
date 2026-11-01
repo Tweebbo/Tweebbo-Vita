@@ -12,6 +12,13 @@ bool world_tile(int x, int y) {
   return x >= 0 && y >= 0 && x < W.w && y < W.h && W.rows[y * W.w + x] != 'x';
 }
 
+int world_floor_height(int x, int y) {
+  if (!world_tile(x, y)) return 0;
+  char level = W.rows[y * W.w + x];
+  if (level >= '0' && level <= '9') return (level - '0') * 16;
+  return level >= 'a' && level <= 'z' ? (level - 'a' + 10) * 16 : 0;
+}
+
 Ent *world_ent(u32 id) {
   for (int i = 0; i < MAX_ENTS; i++) if (W.ents[i].used && W.ents[i].id == id) return &W.ents[i];
   return NULL;
