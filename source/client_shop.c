@@ -4,6 +4,7 @@
 #include "client_ui.h"
 #include "client_casino.h"
 #include "client_camera.h"
+#include "furniture.h"
 #include "catalog.h"
 #include "gfx.h"
 #include "net.h"
@@ -19,7 +20,7 @@ enum { CATEGORIES, OFFERS, OFFER, INVENTORY, OWNED, ROOM_ITEMS, ROOM_ITEM, BUILD
 enum { SELECT_CATEGORY=1000, TURN_PAGE, BACK, SELECT_OFFER, BUY, SELECT_OWNED, PLACE,
        SELECT_ITEM, MOVE_ITEM, ROTATE_ITEM, PICKUP_ITEM, REDEEM_ITEM, CONFIRM_ITEM_ACTION, ROTATE_GHOST, PLACE_GHOST, CANCEL_GHOST,
        FINISH_KIND, FINISH_STEP, FINISH_PREVIEW, FINISH_BUY, FINISH_CONFIRM,
-       SEARCH_OFFERS, INTERACTIONS, USE_ITEM, CLOSE_DICE, DRINK_STEP, GET_DRINK, OPEN_CASINO, INDEX_PAGE, PICK_OWNED, CLEAR_QUERY, ROOM_LIST, PICK_PLACED, INVENTORY_LIST, GHOST_STEP, JOIN_CLUB };
+       SEARCH_OFFERS, INTERACTIONS, USE_ITEM, CLOSE_DICE, DRINK_STEP, GET_DRINK, OPEN_CASINO, INDEX_PAGE, PICK_OWNED, CLEAR_QUERY, ROOM_LIST, PICK_PLACED, INVENTORY_LIST, GHOST_STEP, JOIN_CLUB, CHANGE_STATE, SEND_GIFT, USE_OWNED };
 static struct {
   int panel, page, category, offer, confirm, index;
   u32 item;
@@ -52,15 +53,28 @@ static bool can_buy_finish(void) {
 static void status(const char *s) {snprintf(S.status,sizeof S.status,"%s",s);show_toast(s,now_ms());}
 static void panel(int p) {S.panel=p;S.page=0;S.status[0]=0;client_ui_changed();}
 static bool connected(void) {return W.in_room && net_online();}
+static bool offer_club_allowed(const CatOffer *o){return !o->requires_club||world_club_member();}
 static bool interaction_ready(const FurniDef *d) {
   if(!W.in_room || !d)return false;
   if(net_online())return true;
+  if(d->feature)return false;
   return net_state()==NET_OFFLINE && !(d->flags&(DEF_LAY|DEF_TELEPORTER)) &&
-    (d->drink || d->kind==KIND_SIT || d->kind==KIND_FLOOR || d->kind==KIND_TOGGLE);
+    (d->drink || d->kind==KIND_SIT || d->kind==KIND_FLOOR || (d->use_flags&USE_STATE));
 }
 static const CatOffer *offer(void) {return S.offer>=0 && S.offer<cat_offer_count?&cat_offers[S.offer]:NULL;}
 static InvItem *owned(void) {for(int i=0;i<W.inv_n;i++)if(W.inv[i].id==S.item)return &W.inv[i];return NULL;}
+static bool hand_feature(const FurniDef *d){return d&&(d->feature==F_NOTE||d->feature==F_TROPHY||d->feature==F_GIFT||d->feature==F_MANNEQUIN||d->feature==F_CHANGING||d->feature==F_FOOTBALL_GATE||def_height_helper(d));}
 static int inventory_count(u16 def) {int n=0;for(int i=0;i<W.inv_n;i++)n+=W.inv[i].def==def;return n;}
+static int owned_groups[MAX_INV],owned_counts[MAX_INV],owned_n;
+static void group_owned(void) {
+  owned_n=0;
+  for(int i=0;i<W.inv_n;i++){
+    const FurniDef *d=def_get(W.inv[i].def);int k=0;
+    while(k<owned_n && (W.inv[owned_groups[k]].def!=W.inv[i].def || (d && (d->use_flags&USE_UNIQUE))))k++;
+    if(k==owned_n){owned_groups[owned_n]=i;owned_counts[owned_n++]=0;}
+    owned_counts[k]++;
+  }
+}
 static bool matches(const char *text,const char *query) {
   if(!*query)return true;
   for(const unsigned char *p=(const unsigned char *)(text?text:"");*p;p++) {
@@ -82,24 +96,23 @@ static int drinks(const FurniDef *d,int *ids) {
   }return n;
 }
 static const char *drink_label(int id) {for(int i=0;i<drink_name_count;i++)if(drink_names[i].id==id)return drink_names[i].name;return "Drink";}
-/** Walkable furniture with states (dance floors): the owner switches it (room.rs use_item). */
-static bool floor_states(const FurniDef *d) {
-  for(int i=0;i<floor_switch_count;i++)if(floor_switches[i]==d->id)return true;
-  return false;
-}
 static const char *use_label(const FurniDef *d,const Item *it) {
   if(!d || d->casino)return NULL;
+  if(d->feature)return "Use furniture";
   if(d->flags&DEF_TELEPORTER)return "Enter teleporter";
   if(d->flags&DEF_LAY)return "Lie down";
   if(d->kind==KIND_SIT)return "Sit on furniture";
-  if(d->kind==KIND_FLOOR)return W.room_owner && net_online() && floor_states(d)?(d->states>2?"Change state":it->state?"Turn off / close":"Turn on / open"):"Walk here";
-  if(d->kind==KIND_DICE)return it->state==7?"Rolling...":"Roll dice";
-  if(W.room_owner && (d->kind==KIND_TOGGLE || (d->kind==KIND_WALL && d->states>1)))return d->states>2?"Change state":it->state?"Turn off / close":"Turn on / open";
+  if(d->kind==KIND_FLOOR)return world_can_decorate() && (d->use_flags&USE_STATE)?(d->states>2?"Change state":it->state?"Turn off / close":"Turn on / open"):"Walk here";
+  if(d->kind==KIND_DICE)return it->state==(d->use_random?d->use_random:7)?"Rolling...":d->use_random?"Spin":"Roll dice";
+  if((d->use_flags&USE_STATE) && (!(d->use_flags&USE_RIGHTS) || world_can_decorate()))return d->use_ticks?"Use":d->states>2?"Change state":it->state?"Turn off / close":"Turn on / open";
   return NULL;
 }
 static int page_offers(int *out, int cap) {
   if(S.category==-1) {
-    int n=0;for(int i=0;i<cat_offer_count && n<cap;i++)if(matches(cat_offers[i].name,S.query) || matches(cat_offers[i].desc,S.query))out[n++]=i;
+    int n=0;for(int i=0;i<cat_offer_count && n<cap;i++)if(cat_offers[i].available&&(matches(cat_offers[i].name,S.query) || matches(cat_offers[i].desc,S.query))){
+      bool visible=false;for(int page=0;page<cat_page_count&&!visible;page++){char key[128];snprintf(key,sizeof key,",%s,",cat_pages[page].id);visible=strstr(cat_offers[i].pages,key)!=NULL;}
+      if(visible)out[n++]=i;
+    }
     return n;
   }
   if(S.category<0 || S.category>=cat_page_count)return 0;
@@ -132,7 +145,7 @@ static void start_build(u16 def, u32 id, bool moving) {
   S.ghost=(BuildGhost){.on=true,.def=def,.wall=d->kind==KIND_WALL,.ignore=moving?id:0};
   Ent *me=world_ent(W.me);
   S.ghost.x=it?it->x:me?me->x:0;S.ghost.y=it?it->y:me?me->y:0;
-  S.ghost.rot=it?it->rot:def_rotation(def,0);S.ghost.z=it?it->z:60;
+  S.ghost.rot=it?it->rot:def_rotation(def,0);S.ghost.z=it?it->z:60;S.ghost.z_fine=it?it->z_fine:0;
   if(S.ghost.wall){client_build_wall(&S.ghost,0,true);client_build_wall_clamp(&S.ghost);}
   S.ghost.ok=client_build_valid(&S.ghost);panel(BUILD);
 }
@@ -148,6 +161,8 @@ static void rotate(int step) {
   S.ghost.ok=client_build_valid(&S.ghost);
 }
 void client_shop_action(int cmd, int arg) {
+  if(cmd==USE_OWNED){InvItem *inv=owned();if(inv&&connected()&&hand_feature(def_get(inv->def)))furniture_open(inv->id);return;}
+  if(cmd==SEND_GIFT){const CatOffer *o=offer();if(o)furniture_gift(o->id);return;}
   if(cmd==JOIN_CLUB){client_ui_support();return;}
   if(cmd==OPEN_CAMERA){client_ui_camera();return;}
   if(cmd==TURN_PAGE) {S.page+=arg;if(S.page<0)S.page=0;client_ui_changed();return;}
@@ -182,12 +197,12 @@ void client_shop_action(int cmd, int arg) {
       if(interaction_ready(it?def_get(it->def):NULL) && n && S.drink>=0 && S.drink<n){send_drink(it->id,ids[S.drink]);client_ui_close();}
       break;
     }
-    case USE_ITEM: case CLOSE_DICE: {
+    case USE_ITEM: case CLOSE_DICE: case CHANGE_STATE: {
       const FurniDef *d=it?def_get(it->def):NULL;
       if(!interaction_ready(d) || !use_label(d,it))break;
-      if(d->kind==KIND_DICE && (it->state==7 || (cmd==CLOSE_DICE && !it->state)))break;
+      if(d->kind==KIND_DICE && (it->state==(d->use_random?d->use_random:7) || (cmd==CLOSE_DICE && (!it->state || d->use_random))))break;
       if(cmd==CLOSE_DICE && d->kind!=KIND_DICE)break;
-      if(net_state()==NET_OFFLINE && (d->kind==KIND_SIT || d->kind==KIND_FLOOR))send_walk(it->x,it->y);
+      if(cmd!=CHANGE_STATE && !d->feature && (d->kind==KIND_SIT || (d->kind==KIND_FLOOR && !(d->use_flags&USE_STATE))))send_walk(it->x,it->y);
       else send_use_op(it->id,cmd==CLOSE_DICE?1:0);
       client_ui_close();break;
     }
@@ -209,7 +224,7 @@ void client_shop_action(int cmd, int arg) {
         pending(cmd,(u32)S.finish,W.finish_rev);send_decorate(finish()->kind,finish()->id);
       }break;
     case BUY:
-      if(connected() && o && o->available && W.credits>=o->price) {pending(BUY,o->def,inventory_count(o->def));send_buy(o->id);}break;
+      if(connected() && o && o->available && offer_club_allowed(o) && W.credits>=o->price) {pending(BUY,o->def,inventory_count(o->def));send_buy(o->id);}break;
     case PLACE: if(inv)start_build(inv->def,inv->id,false);break;
     case MOVE_ITEM: if(it)start_build(it->def,it->id,true);break;
     case ROTATE_ITEM:
@@ -240,14 +255,14 @@ void client_shop_item(u32 id) {
   if(!S.pending || id!=S.expected)return;
   Item *it=world_item(id);
   if(!it)return;
-  bool placed=S.pending==PLACE_GHOST && it->x==S.ghost.x && it->y==S.ghost.y && it->rot==S.ghost.rot && it->z==S.ghost.z;
+  bool placed=S.pending==PLACE_GHOST && it->x==S.ghost.x && it->y==S.ghost.y && it->rot==S.ghost.rot && it->z==S.ghost.z && it->z_fine==S.ghost.z_fine;
   if(placed || S.pending==ROTATE_ITEM) {
     S.pending=0;if(placed){S.ghost.on=false;panel(ROOM_ITEM);}status("Furniture updated.");
   }
 }
 void client_shop_notice(const char *text) {
   if(!text || !S.pending)return;
-  bool purchase_error=!strcmp(text,"You do not have enough credits.") || !strcmp(text,"This item's resources are not all available yet.");
+  bool purchase_error=!strcmp(text,"You do not have enough credits.") || !strcmp(text,"This item's resources are not all available yet.") || !strcmp(text,"This item requires Tweebbo Club membership.");
   bool furniture_error=!strcmp(text,"This item is occupied.") || !strcmp(text,"The bed is occupied.")
     || !strcmp(text,"Remove the items stacked on top first.") || !strcmp(text,"The item does not fit there.")
     || !strcmp(text,"There is no room to rotate it.") || !strncmp(text,"Furniture can only be ",22)
@@ -353,6 +368,12 @@ static int grid(float x, float y, float w, float h, int n, int (*item)(int,u16*,
   for(int k=0;k<per && S.page*per+k<n;k++) {
     u16 def;bool sel;int cmd,arg;item(S.page*per+k,&def,&sel,&cmd,&arg);
     slot(x+(k%cols)*42,y+(k/cols)*42,def,sel,cmd,arg);
+    if(cmd==PICK_OWNED && owned_counts[S.page*per+k]>1){
+      char count[16];snprintf(count,sizeof count,"x%d",owned_counts[S.page*per+k]);
+      float cx=x+(k%cols)*42,cy=y+(k/cols)*42;
+      fill_rect(cx+12,cy+27,28,12,client_ui_rgb(0x202020));
+      text_draw(count,cx+26,cy+28,9,client_ui_rgb(0xffffff),1);
+    }
   }
   return pages;
 }
@@ -360,7 +381,7 @@ static int book_offers[4096],book_offer_n;
 static int offer_item(int i,u16 *def,bool *sel,int *cmd,int *arg){int o=book_offers[i];*def=cat_offers[o].def;*sel=o==S.offer;*cmd=SELECT_OFFER;*arg=o;return 0;}
 static int room_items[MAX_ITEMS],room_item_n;
 static int placed_item(int i,u16 *def,bool *sel,int *cmd,int *arg){Item *a=&W.items[room_items[i]];*def=a->def;*sel=a->id==room_pick;*cmd=PICK_PLACED;*arg=(int)a->id;return 0;}
-static int owned_item(int i,u16 *def,bool *sel,int *cmd,int *arg){*def=W.inv[i].def;*sel=W.inv[i].id==S.item;*cmd=PICK_OWNED;*arg=(int)W.inv[i].id;return 0;}
+static int owned_item(int i,u16 *def,bool *sel,int *cmd,int *arg){int first=owned_groups[i];*def=W.inv[first].def;*sel=W.inv[first].id==S.item;*cmd=PICK_OWNED;*arg=(int)W.inv[first].id;return 0;}
 static void pager(float x, float y, float w, int pages) {
   char s[32];snprintf(s,sizeof s,"%d / %d",S.page+1,pages);
   client_ui_arrow(x,y,22,18,"<",S.page?TURN_PAGE:0,-1);
@@ -400,6 +421,7 @@ static void book(float x, float y, float w, float h) {
     text_draw(head,mx,iy+1,13,client_ui_rgb(INK),0);
   }
   if(S.query[0])client_ui_button(mx+mw-64,iy-1,64,20,TR("Clear"),CLEAR_QUERY,0);
+  else if(offer())client_ui_button(mx+mw-64,iy-1,64,20,TR("Gift"),connected()&&offer()->available&&offer_club_allowed(offer())?SEND_GIFT:0,0);
   fill_rect(mx,iy+head_h,mw,1,client_ui_rgb(0x888888));
   book_offer_n=page_offers(book_offers,COUNT(book_offers));
   float gy=iy+head_h+6,strip_y=ib-50;
@@ -413,6 +435,9 @@ static void book(float x, float y, float w, float h) {
     if(pg && !strcmp(pg->id,"1"))body="Browse the ranges with L/R or the tabs on the right. Seasonal ranges change regularly, so check back for new items.";
     else if(pg && !strcmp(pg->id,"4"))body="Credit coins are bought with credits. Chip tokens are bought with chips, lock for 24 hours after a trade, and redeem back into chips.";
     client_ui_paragraph(TR(body),mx,gy,mw,wide?7:4,MUTED);
+    if(pg&&(!strcmp(pg->id,"1")||!strcmp(pg->id,"catalogue_search"))){
+      client_ui_button(mx,gy+(wide?76:44),mw,26,TR("Find an object"),SEARCH_OFFERS,0);
+    }
     if(pg && !strcmp(pg->id,"1"))for(int i=0;i<cat_page_count;i++)if(!strcmp(cat_pages[i].id,"4")) {
       float by=gy+(wide?128:72);
       bool focus=client_ui_hot(mx,by,mw,40,SELECT_CATEGORY,i);
@@ -432,8 +457,8 @@ static void book(float x, float y, float w, float h) {
   char price[96],action_ok=0;
   if(o) {
     if(o->amount>1)snprintf(price,sizeof price,TR("%u credits / %u items"),o->price,o->amount);else snprintf(price,sizeof price,TR("%u credits"),o->price);
-    action_ok=connected()&&o->available&&W.credits>=o->price&&!S.pending;
-    strip(mx,strip_y,mw,o->def,o->name,price,!o->available?"Not available yet.":W.credits<o->price?"Not enough credits.":o->desc,"Buy",action_ok?BUY:0);
+    action_ok=connected()&&o->available&&offer_club_allowed(o)&&W.credits>=o->price&&!S.pending;
+    strip(mx,strip_y,mw,o->def,o->name,price,!o->available?"Not available yet.":!offer_club_allowed(o)?"Club required.":W.credits<o->price?"Not enough credits.":o->desc,"Buy",action_ok?BUY:0);
   } else {
     snprintf(price,sizeof price,TR("Balance: %u credits"),W.credits);
     strip(mx,strip_y,mw,0,"Choose a product",price,"Select an item for a closer look.",NULL,0);
@@ -445,10 +470,12 @@ static void hand(float x, float y, float w, float h) {
   char head[64];snprintf(head,sizeof head,TR("Inventory (%d)"),W.inv_n);
   text_draw(head,ix,iy+1,13,client_ui_rgb(INK),0);
   client_ui_button(ix+iw-118,iy-1,118,20,TR("Room furniture"),ROOM_LIST,0);
+  InvItem *selected=owned();if(selected&&hand_feature(def_get(selected->def)))client_ui_button(ix+iw-190,iy-1,66,20,TR("Use"),connected()?USE_OWNED:0,0);
   fill_rect(ix,iy+20,iw,1,client_ui_rgb(0x888888));
   float gy=iy+26,strip_y=ib-50;
   if(!W.inv_n){client_ui_paragraph(TR("Your inventory is empty. Furniture you buy in the Catalogue waits here."),ix,gy,iw,3,MUTED);return;}
-  int pages=grid(ix,gy,iw,strip_y-24-gy,W.inv_n,owned_item);
+  group_owned();
+  int pages=grid(ix,gy,iw,strip_y-24-gy,owned_n,owned_item);
   pager(ix,strip_y-21,iw,pages);
   InvItem *inv=owned();const FurniDef *d=inv?def_get(inv->def):NULL;
   if(inv) {
@@ -501,9 +528,10 @@ void client_shop_draw(float x, float y, float w, float h) {
     } else {
       const char *action=use_label(d,it);
       if(d && d->casino)client_ui_button(x+104,y+60,w-112,26,TR("Open casino game"),connected()?OPEN_CASINO:0,0);
-      else if(action)client_ui_button(x+104,y+60,w-112,26,action,interaction_ready(d)&&!S.pending&&!(d->kind==KIND_DICE && it->state==7)?USE_ITEM:0,0);
+      else if(action)client_ui_button(x+104,y+60,w-112,26,action,interaction_ready(d)&&!S.pending&&!(d->kind==KIND_DICE && it->state==(d->use_random?d->use_random:7))?USE_ITEM:0,0);
       else client_ui_paragraph(TR("No direct action for this furniture."),x+104,y+60,w-114,4,0x26373a);
-      if(d && d->kind==KIND_DICE && it->state && it->state!=7)client_ui_button(x+104,y+94,w-112,26,TR("Close dice"),connected()&&!S.pending?CLOSE_DICE:0,0);
+      if(d && d->kind==KIND_SIT && (d->use_flags&USE_STATE) && (!(d->use_flags&USE_RIGHTS) || world_can_decorate()))client_ui_button(x+104,y+94,w-112,26,it->state?TR("Close"):TR("Open"),interaction_ready(d)?CHANGE_STATE:0,0);
+      if(d && !d->use_random && d->kind==KIND_DICE && it->state && it->state!=7)client_ui_button(x+104,y+94,w-112,26,TR("Close dice"),connected()&&!S.pending?CLOSE_DICE:0,0);
       if(d && d->desc)client_ui_paragraph(d->desc,x+10,y+150,w-20,2,0x26373a);
       if(d && net_state()==NET_OFFLINE && !interaction_ready(d))client_ui_label(TR("This action requires a hotel connection."),x+10,y+174,w-20,0x26373a);
     }
@@ -534,7 +562,7 @@ void client_shop_draw(float x, float y, float w, float h) {
     int indices[4096],n=0;
     if(S.panel==CATEGORIES)n=cat_page_count;
     if(S.panel==OFFERS)n=page_offers(indices,COUNT(indices));
-    if(S.panel==INVENTORY)n=W.inv_n;
+    if(S.panel==INVENTORY){group_owned();n=owned_n;}
     if(S.panel==ROOM_ITEMS)for(int i=0;i<MAX_ITEMS;i++)if(W.items[i].used)indices[n++]=i;
     int count=(n+4)/5;if(S.page>=count)S.page=count?count-1:0;
     const char *title=S.panel==CATEGORIES?"Catalogue":S.panel==OFFERS?(S.category==-1?"Search results":cat_pages[S.category].name):S.panel==INVENTORY?"Inventory":"Room furniture";
@@ -548,9 +576,12 @@ void client_shop_draw(float x, float y, float w, float h) {
       else if(S.panel==OFFERS){const CatOffer *a=&cat_offers[indices[i]];cmd=SELECT_OFFER;arg=indices[i];snprintf(line,sizeof line,TR("%s - %u credits"),TR(a->name),a->price);name=line;}
       else {
         u16 def;u32 id;
-        if(S.panel==INVENTORY){def=W.inv[i].def;id=W.inv[i].id;cmd=SELECT_OWNED;}
+        if(S.panel==INVENTORY){def=W.inv[owned_groups[i]].def;id=W.inv[owned_groups[i]].id;cmd=SELECT_OWNED;}
         else {Item *a=&W.items[indices[i]];def=a->def;id=a->id;cmd=SELECT_ITEM;}
-        const FurniDef *d=def_get(def);snprintf(line,sizeof line,"%s #%u",d?d->name:"Item",id);name=line;arg=(int)id;
+        const FurniDef *d=def_get(def);
+        if(S.panel==INVENTORY && owned_counts[i]>1)snprintf(line,sizeof line,"%s x%d",d?d->name:"Item",owned_counts[i]);
+        else snprintf(line,sizeof line,"%s #%u",d?d->name:"Item",id);
+        name=line;arg=(int)id;
       }
       client_ui_button(x+8,y+56+row*25,w-16,23,name,cmd,arg);
     }
@@ -563,14 +594,17 @@ void client_shop_draw(float x, float y, float w, float h) {
     if(S.panel==OFFER && o) {
       snprintf(line,sizeof line,TR("%u credits / %u item%s"),o->price,o->amount,o->amount==1||tw_language()==TW_ZH||tw_language()==TW_JA?"":"s");client_ui_label(line,x+104,y+57,w-114,0x18272a);
       snprintf(line,sizeof line,TR("Balance: %u"),W.credits);client_ui_label(line,x+104,y+81,w-114,0x26373a);
-      client_ui_label(o->available?W.credits>=o->price?TR("Confirm to purchase."):TR("Not enough credits."):TR("Not available."),x+104,y+105,w-114,0x26373a);
+      client_ui_label(o->available?!offer_club_allowed(o)?TR("Club required."):W.credits>=o->price?TR("Confirm to purchase."):TR("Not enough credits."):TR("Not available."),x+104,y+105,w-114,0x26373a);
       client_ui_paragraph(TR(o->desc),x+10,y+145,w-20,2,0x26373a);
-      client_ui_button(x+w-144,y+188,136,24,TR("Confirm purchase"),connected()&&o->available&&W.credits>=o->price&&!S.pending?BUY:0,0);
+      client_ui_button(x+w-144,y+188,136,24,TR("Confirm purchase"),connected()&&o->available&&offer_club_allowed(o)&&W.credits>=o->price&&!S.pending?BUY:0,0);
     } else if(S.panel==OWNED) {
       client_ui_label(world_can_decorate()?TR("Place this item in the room."):TR("Enter a room you can decorate."),x+104,y+62,w-114,0x26373a);
       client_ui_button(x+104,y+100,w-112,26,TR("Place"),inv&&connected()&&world_can_decorate()&&!S.pending?PLACE:0,0);
+      if(hand_feature(d))client_ui_button(x+104,y+136,w-112,26,TR("Use furniture"),inv&&connected()?USE_OWNED:0,0);
     } else if(S.panel==BUILD) {
-      snprintf(line,sizeof line,TR("Tile %d, %d / height %d"),S.ghost.x,S.ghost.y,S.ghost.z);client_ui_label(line,x+104,y+57,w-114,0x18272a);
+      if(S.ghost.z_fine)snprintf(line,sizeof line,TR("Tile %d, %d / height %d.%02u"),S.ghost.x,S.ghost.y,S.ghost.z,S.ghost.z_fine);
+      else snprintf(line,sizeof line,TR("Tile %d, %d / height %d"),S.ghost.x,S.ghost.y,S.ghost.z);
+      client_ui_label(line,x+104,y+57,w-114,0x18272a);
       client_ui_label(S.ghost.ok?TR("Free spot"):TR("Choose a free spot"),x+104,y+81,w-114,0x26373a);
       // Touch arrows as well as the D-pad: docked, every step is also on the pad (see the bar).
       client_ui_arrow(x+104,y+106,30,22,"<",!S.pending?GHOST_STEP:0,3);

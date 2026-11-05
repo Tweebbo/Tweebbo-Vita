@@ -15,6 +15,7 @@ for file in source/gen/font.c; do
 done
 
 mkdir -p romfs/gfx romfs/furni romfs/spaces
+cp build/pack-hd/fxpeople.pak romfs/fxpeople.pak
 cp build/pack-hd/spaces/*.mask build/pack-hd/spaces/*.rgb romfs/spaces/
 rm -f romfs/gfx/atlas*.png romfs/furni/*.png
 # Atlas pages, bitmap font and the classic room backgrounds/scenes.
@@ -31,7 +32,7 @@ cp "$GFX"/furni/*.png romfs/furni/
 # Sprite coordinates and texture pages must come from the same export. The local
 # assets.h stays because the console RoomItem also carries the offline item state.
 mkdir -p source/gen
-cp build/pack-hd/gen/game_rooms.h build/pack-hd/gen/assets.c build/pack-hd/gen/character_skins.h build/pack-hd/gen/igloo.h "$SRC/source/gen/font.c" source/gen/
+cp build/pack-hd/gen/game_rooms.h build/pack-hd/gen/assets.c build/pack-hd/gen/avatar_effect_data.c build/pack-hd/gen/character_skins.h build/pack-hd/gen/igloo.h build/pack-hd/gen/igloo_fx_pixels.h "$SRC/source/gen/font.c" source/gen/
 echo "romfs ready: $(ls romfs/gfx | wc -l) gfx files, $(ls romfs/furni | wc -l) furniture textures"
 
 mkdir -p romfs/snow

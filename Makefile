@@ -78,7 +78,7 @@ $(BUILD)/$(TARGET).elf: $(OBJ)
 romfs/furni.pak: $(wildcard romfs/furni/*.png)
 	python3 tools/pack-furni.py
 
-out/$(TARGET).vpk: $(BUILD)/$(TARGET).elf $(SCE_SYS) romfs/furni.pak $(wildcard romfs/gfx/*.png) $(wildcard romfs/spaces/*) $(wildcard romfs/snow/*) $(wildcard romfs/fastfood/*) $(wildcard romfs/battle/*) $(wildcard romfs/lang/*) $(wildcard romfs/ui/*) tools/pack-vpk.py Makefile
+out/$(TARGET).vpk: $(BUILD)/$(TARGET).elf $(SCE_SYS) romfs/furni.pak romfs/fxpeople.pak $(wildcard romfs/gfx/*.png) $(wildcard romfs/spaces/*) $(wildcard romfs/snow/*) $(wildcard romfs/fastfood/*) $(wildcard romfs/battle/*) $(wildcard romfs/lang/*) $(wildcard romfs/ui/*) tools/pack-vpk.py Makefile
 	vita-elf-create $(BUILD)/$(TARGET).elf $(BUILD)/$(TARGET).velf
 	vita-make-fself -c $(BUILD)/$(TARGET).velf $(BUILD)/eboot.bin
 	vita-mksfoex -s TITLE_ID=$(TITLE_ID) -s APP_VER=$(SFO_VERSION) -s VERSION=$(SFO_VERSION) "$(APP_NAME)" $(BUILD)/param.sfo

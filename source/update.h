@@ -4,7 +4,7 @@
 #pragma once
 #include "common.h"
 
-typedef enum { UPD_IDLE, UPD_CHECKING, UPD_LATEST, UPD_AVAILABLE, UPD_DOWNLOADING, UPD_INSTALLED, UPD_FAILED } UpdateState;
+typedef enum { UPD_IDLE, UPD_CHECKING, UPD_LATEST, UPD_AVAILABLE, UPD_DOWNLOADING, UPD_INSTALLED, UPD_FAILED, UPD_READY, UPD_INSTALLING } UpdateState;
 
 /** Background check: at login and every 15 minutes while the hotel is online. */
 void update_poll(u64 now);
@@ -24,6 +24,14 @@ const char *update_installed_path(void);
 float update_progress(void);
 /** Downloads and installs the offered release. */
 void update_start(void);
+/** Apply the staged application only after an explicit player request. */
+void update_install(void);
+void update_pause(bool paused);
+bool update_paused(void);
+/** Stop preparation, retain partial downloads, and wait before networking is torn down. */
+void update_shutdown(void);
+long update_done_bytes(void);
+long update_total_bytes(void);
 /** Switch: asks the main loop to exit so the new NRO is loaded next time. Vita: false. */
 bool update_restart(void);
 bool update_exit_requested(void);

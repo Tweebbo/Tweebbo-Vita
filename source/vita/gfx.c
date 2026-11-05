@@ -1,3 +1,5 @@
+#include "gfx_color.h"
+#include "vita_highlight.h"
 // Tweebbo Vita graphics: vita2d with nearest filtering and a 2× integer canvas.
 // Implements the gfx.h contract (ABGR colors — the native vita2d format).
 #include "gfx.h"
@@ -17,7 +19,7 @@
 #include "client_shop.h"
 #include "photo_pixels.h"
 
-#define ATLAS_MAX 16
+#define ATLAS_MAX 64
 /* Big enough for the busiest room (lobby_hall + players), so a frame never evicts what
    it is about to draw. Furniture lives in main memory (4 KB granularity), not CDRAM. */
 #define FURNI_CACHE 512
@@ -30,6 +32,8 @@
 #define S 2.0f
 
 static vita2d_texture *atlas[ATLAS_MAX];
+static struct {vita2d_texture *texture;u64 key;u16 effect;u32 used;int x,y,w,h;} avatar_fx[128];
+static u32 avatar_fx_frame;
 static vita2d_texture *font_tex;
 static vita2d_texture *cjk_tex;
 static vita2d_texture *pet_tex[64];
@@ -37,6 +41,11 @@ static vita2d_texture *mask_tri_up, *mask_tri_down, *mask_disc;
 static float view_x,view_y,view_kx=1,view_ky=1;
 void gfx_sprite_transform(float x,float y,float kx,float ky){view_x=x;view_y=y;view_kx=kx;view_ky=ky;}
 static bool additive;
+static uint32_t modulation=UINT32_MAX;
+static GfxHighlightMatrix highlight_matrix;
+static bool highlight_active;
+void gfx_highlight(int kind,u32 rgb,int strength){highlight_active=(kind==2||kind==3||kind==4)&&strength>0;gfx_highlight_matrix(kind,rgb,strength,&highlight_matrix);}
+void gfx_modulate(u32 color){modulation=color;}
 static int frame_draws, frame_skipped, max_draws;
 static u8 *photo_pending;
 static int photo_status;
@@ -249,6 +258,7 @@ static vita2d_texture *furni_blob(u16 def, u16 page) {
 bool gfx_init(void) {
   dbg_log("gfx: vita2d_init...");
   vita2d_init_advanced(VERTEX_POOL);
+  if(!vita_highlight_init()){dbg_log("gfx: highlight shader initialization failed");return false;}
   vita2d_set_clear_color(RGBA8(0x0b, 0x0d, 0x0e, 255));
   dbg_log("gfx: vita2d ready");
   // The export decides the atlas pages (atlas0..N and atlasg0..N).
@@ -269,6 +279,8 @@ bool gfx_init(void) {
 }
 
 void gfx_exit(void) {
+  for(int i=0;i<COUNT(avatar_fx);i++)if(avatar_fx[i].texture)vita2d_free_texture(avatar_fx[i].texture);
+  avatar_effect_pixels_close();
   vita2d_wait_rendering_done();
   if(photo_texture){vita2d_free_texture(photo_texture);photo_texture=NULL;}
   audio_exit();
@@ -289,6 +301,7 @@ void gfx_exit(void) {
   free(pak.idx);memset(&pak,0,sizeof pak);
   for (int i = 0; i < 4; i++) if (scene_v.tex[i]) { vita2d_free_texture(scene_v.tex[i]); scene_v.tex[i] = NULL; }
   battle_blend_free();
+  vita_highlight_free();
   vita2d_fini();
 }
 
@@ -303,6 +316,7 @@ void gfx_frame(void) {
 }
 
 void gfx_begin(void) {
+  avatar_fx_frame++;
   frame_draws = frame_skipped = 0;
   vita2d_start_drawing();
   vita2d_clear_screen();
@@ -336,6 +350,7 @@ void gfx_present(void) {
 
 static void draw_tex(vita2d_texture *t, int sx, int sy, int sw, int sh, float x, float y, float kx, float ky, bool flip,
                      u32 color) {
+  color=gfx_color_multiply(color,additive?additive_tint(modulation):modulation);
   if (!t || sw <= 0 || sh <= 0 || kx == 0 || ky == 0 || !pool_ok()) return;
   x=view_x+x*view_kx;y=view_y+y*view_ky;kx*=view_kx;ky*=view_ky;
   float dx = x * S, dy = y * S, ax = kx * S, ay = ky * S;
@@ -344,7 +359,28 @@ static void draw_tex(vita2d_texture *t, int sx, int sy, int sw, int sh, float x,
     dx += sw * ax;
     ax = -ax;
   }
+  if(highlight_active){vita_highlight_draw(t,dx,dy,sx,sy,sw,sh,ax,ay,color,additive,&highlight_matrix);return;}
   vita2d_draw_texture_tint_part_scale(t, dx, dy, sx, sy, sw, sh, ax, ay, color);
+}
+
+bool gfx_avatar_effect(u64 key,u16 effect,const AvatarFxDraw *parts,unsigned count,bool mirrored,float x,float y,float scale,u8 alpha){
+  int slot=-1;
+  for(int i=0;i<COUNT(avatar_fx);i++){
+    if(avatar_fx[i].texture&&avatar_fx[i].key==key&&avatar_fx[i].effect==effect){slot=i;goto draw;}
+    if(!avatar_fx[i].texture){if(slot<0||avatar_fx[slot].texture)slot=i;}
+    else if(avatar_fx[i].used+1<avatar_fx_frame&&(slot<0||(avatar_fx[slot].texture&&avatar_fx[i].used<avatar_fx[slot].used)))slot=i;
+  }
+  if(slot<0)return false;
+  AvatarFxBitmap bitmap;if(!avatar_effect_compose(parts,count,mirrored,effect,&bitmap))return false;
+  vita2d_texture *texture=texture_from_rgba(bitmap.pixels,bitmap.width,bitmap.height);free(bitmap.pixels);
+  if(!texture)return false;
+  if(avatar_fx[slot].texture){vita2d_wait_rendering_done();vita2d_free_texture(avatar_fx[slot].texture);}
+  avatar_fx[slot].texture=texture;avatar_fx[slot].key=key;avatar_fx[slot].effect=effect;
+  avatar_fx[slot].x=bitmap.x;avatar_fx[slot].y=bitmap.y;avatar_fx[slot].w=bitmap.width;avatar_fx[slot].h=bitmap.height;
+draw:
+  avatar_fx[slot].used=avatar_fx_frame;
+  draw_tex(avatar_fx[slot].texture,0,0,avatar_fx[slot].w,avatar_fx[slot].h,x+avatar_fx[slot].x*scale,y+avatar_fx[slot].y*scale,scale,scale,false,0x00ffffffu|((u32)alpha<<24));
+  return true;
 }
 
 void gfx_sprite(int page, int sx, int sy, int sw, int sh, float x, float y, float scale, bool flip, u32 color) {

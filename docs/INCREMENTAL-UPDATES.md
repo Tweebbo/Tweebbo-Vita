@@ -14,8 +14,11 @@ application and combines them with downloaded changes.
 
 If a patch or installed resource is incompatible or damaged, Full download is
 offered explicitly. The updater never silently starts the larger transfer.
-Storage errors retain the current app and explain the failure. Normal exit is
-blocked during update work; OS termination/power-loss acceptance still needs
+Storage errors retain the current app and explain the failure. Preparation runs
+in the background and can be paused while playing. A completed preparation waits
+for Install. Quitting during preparation stops its worker before network teardown
+and retains the verified download prefix for a later resume. Only the final
+installation blocks normal exit; OS termination/power-loss acceptance still needs
 physical-device testing.
 
 Switch prepares a complete verified NRO and replaces the previous file with a
@@ -85,9 +88,12 @@ python3 tests/incremental-worker.py
 
 The first suite checks the production decoder against 31 positive/adversarial
 cases. Structured NRO/VPK fixtures test identity, versions, empty shared-offset
-files, paths and compression. Forty production-updater cases run both platform
+files, paths and compression. Forty-six production-updater cases run both platform
 branches against real isolated HTTP fixtures, covering resume, explicit full
 fallback, wrong metadata, short writes, cached retries and atomic replacement.
+Cancellation cases cover a paused download, a stalled body and a stalled release
+manifest; retained downloads resume with a nonzero HTTP Range and preserve the
+installed application and account data.
 
 `tools/host/run.sh` supports isolated `HOST_PROFILE` names. `UI_EXERCISE=update`
 exercises Later, manual recheck, small preparation and the final instructions in

@@ -14,6 +14,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <stdatomic.h>
 
 #if TWEEBBO_DEVICE == 3
 #define UPDATE_REPO "Tweebbo/Tweebbo-Vita"
@@ -81,9 +82,13 @@ static struct {
   bool full_fallback;
   bool download_invalid;
   bool dismissed, exit_requested;
-  volatile bool thread_active;
+  atomic_bool thread_active,paused,quit;
   u64 last_check;
 } U;
+
+static bool preparation_wait(void *unused){(void)unused;while(atomic_load(&U.paused)&&!atomic_load(&U.quit))wait_ms(20);return atomic_load(&U.quit);}
+static bool retry_wait(unsigned milliseconds){for(unsigned n=0;n<milliseconds&&!preparation_wait(NULL);n+=20)wait_ms(20);return !atomic_load(&U.quit);}
+void update_shutdown(void){atomic_store(&U.quit,true);atomic_store(&U.paused,false);while(atomic_load(&U.thread_active))wait_ms(10);}
 
 static void copy_text(char *dst, size_t cap, const char *src) {
   if (!src) src = "";
@@ -220,7 +225,7 @@ static void read_small_offer(json_t *release) {
     long bytes = (long)json_integer_value(json_object_get(asset, "size"));
     if (!allowed_artifact(url) || !is_sha256(sha) || bytes <= 0 || bytes >= 16384) return;
     Mem body = {malloc(16384), 0, 16384}; long total = 0; char error[128] = "";
-    int status = body.buf ? http_download(url, to_memory, &body, &total, error, sizeof error) : 0;
+    int status = body.buf ? http_download_from_cancel(url,0,to_memory,&body,&total,error,sizeof error,&(ConnCancel){preparation_wait,NULL}) : 0;
     if (status != 200 || body.len != bytes) { free(body.buf); return; }
     mbedtls_sha256_context hash; u8 digest[32]; char text[65];
     mbedtls_sha256_init(&hash); sha_start(&hash); sha_update(&hash, (u8 *)body.buf, (size_t)body.len); sha_finish(&hash, digest); mbedtls_sha256_free(&hash);
@@ -249,7 +254,7 @@ static UpdateState read_manifest(void) {
   long total = 0;
   char err[128] = "";
   int status = 0;
-  if (m.buf) status = http_download(manifest_url(), to_memory, &m, &total, err, sizeof err);
+  if (m.buf) status = http_download_from_cancel(manifest_url(),0,to_memory,&m,&total,err,sizeof err,&(ConnCancel){preparation_wait,NULL});
   if (!m.buf) status = 0;
   if (status == 404) {
     free(m.buf);
@@ -344,7 +349,8 @@ static bool start_thread(void *(*fn)(void *), void *arg) {
 }
 
 static void start_check(bool quiet) {
-  if (U.state == UPD_CHECKING || U.state == UPD_DOWNLOADING || U.state == UPD_INSTALLED) return;
+  if(atomic_load(&U.quit))return;
+  if (U.state == UPD_CHECKING || U.state == UPD_DOWNLOADING || U.state == UPD_READY || U.state == UPD_INSTALLING || U.state == UPD_INSTALLED) return;
   if (U.thread_active) return;
   if (!net_online()) {
     if (!quiet) {
@@ -391,6 +397,7 @@ typedef struct {
 
 static bool file_sink(const u8 *data, int len, void *ctx) {
   Sink *s = ctx;
+  if(preparation_wait(NULL))return false;
   if (len < 0 || U.done > U.progress_total || len > U.progress_total - U.done) { s->write_failed = true; U.download_invalid = true; return false; }
   if (fwrite(data, 1, (size_t)len, s->file) != (size_t)len) { s->write_failed = true; return false; }
   sha_update(&s->sha, data, (size_t)len);
@@ -425,11 +432,11 @@ static bool download_file(const char *url, const char *sha, long expected, const
       snprintf(err, (size_t)cap, "The partial update is invalid. Try again."); return false;
     }
     size_t n;
-    while ((n = fread(buf, 1, CHUNK, old)) > 0) {
+    while (!preparation_wait(NULL)&&(n = fread(buf, 1, CHUNK, old)) > 0) {
       sha_update(&s.sha, buf, n);
       offset += (long)n;
     }
-    bool read_ok = !ferror(old); if (fclose(old)) read_ok = false;
+    bool read_ok = !ferror(old)&&!atomic_load(&U.quit); if (fclose(old)) read_ok = false;
     if (!read_ok) { free(buf); mbedtls_sha256_free(&s.sha); snprintf(err, (size_t)cap, "Could not read the saved update."); return false; }
     if (offset) dbg_log("update: resuming at %ld", offset);
   }
@@ -442,11 +449,12 @@ static bool download_file(const char *url, const char *sha, long expected, const
     snprintf(err, (size_t)cap, "Could not save the update on the SD card. Is it full or locked?");
   }
   for (int attempt = 0; s.file && attempt < DOWNLOAD_ATTEMPTS; attempt++) {
-    if (attempt) wait_ms(attempt < 4 ? attempt * 2000 : 8000);
+    if(preparation_wait(NULL))break;
+    if(attempt&&!retry_wait(attempt<4?attempt*2000:8000))break;
     if (offset == expected) { ok = true; break; }
     long total = 0;
     err[0] = 0;
-    int status = http_download_from(url, offset, file_sink, &s, &total, err, cap);
+    int status = http_download_from_cancel(url,offset,file_sink,&s,&total,err,cap,&(ConnCancel){preparation_wait,NULL});
     if (fflush(s.file) || s.write_failed) {
       snprintf(err, (size_t)cap, "Could not save the update on the SD card. Is it full?");
       break;
@@ -499,7 +507,7 @@ static bool install_nro(const char *tmp, const char *target, char *err, int cap)
   return true;
 }
 
-static void rebuild_progress(unsigned bytes, void *user) { (void)user; U.done = bytes; }
+static void rebuild_progress(unsigned bytes, void *user) { (void)user;preparation_wait(NULL);U.done = bytes; }
 static const char *installed_resources(void) {
 #ifdef TWEEBBO_HOST
   const char *path = getenv("TWEEBBO_UPDATE_RESOURCES"); if (path && *path) return path;
@@ -525,14 +533,16 @@ static void *install_thread(void *arg) {
   snprintf(path, sizeof path, UPDATE_DATA_DIR "/update-" UPDATE_ASSET);
   update_mkdir(UPDATE_DATA_DIR);
   char patch[380], rebuilt[380]; snprintf(patch, sizeof patch, "%s.tupd.part", path); snprintf(rebuilt, sizeof rebuilt, "%s.rebuilding", path);
-  bool ok = incremental_verify(path, U.sha, (unsigned)U.size, NULL);
+  IncrementalHooks checking={preparation_wait,rebuild_progress,NULL};
+  bool ok = incremental_verify(path, U.sha, (unsigned)U.size, &checking);
+  if(atomic_load(&U.quit)){U.thread_active=false;return NULL;}
   if (!ok && update_small()) {
     copy_text(U.phase, sizeof U.phase, "Downloading smaller update");
     ok = download_file(U.small.url, U.small.sha256, U.small.bytes, patch, err, sizeof err);
     if (ok) {
       copy_text(U.phase, sizeof U.phase, "Preparing update from installed files"); U.done = 0; U.progress_total = U.size;
       IncrementalTarget target = {UPDATE_IDENTITY, APP_VERSION, U.version, U.sha, (unsigned)U.size, UPDATE_KIND};
-      IncrementalHooks hooks = {NULL, rebuild_progress, NULL};
+      IncrementalHooks hooks = {preparation_wait, rebuild_progress, NULL};
       IncrementalResult result = incremental_apply(patch, rebuilt, installed_resources(), &U.small, &target, &hooks, err, sizeof err);
       ok = result == INCREMENTAL_OK;
       if (ok) ok = install_nro(rebuilt, path, err, sizeof err);
@@ -546,11 +556,20 @@ static void *install_thread(void *arg) {
     copy_text(U.phase, sizeof U.phase, "Downloading full update");
     ok = download_file(U.url, U.sha, U.size, path, err, sizeof err);
   }
-  if (ok) {
-    copy_text(U.phase, sizeof U.phase, "Verifying prepared update");
-    ok = incremental_verify(path, U.sha, (unsigned)U.size, NULL);
-    if (!ok) copy_text(err, sizeof err, "The prepared update failed verification. Your current app is retained.");
-  }
+  if(ok)copy_text(U.phase,sizeof U.phase,"Update ready. Keep playing or install when convenient.");
+  if (!ok) copy_text(U.error, sizeof U.error, err[0] ? err : "The update failed.");
+  U.state = ok ? UPD_READY : UPD_FAILED;
+  U.thread_active = false;
+  return NULL;
+}
+
+static void *commit_thread(void *unused){
+  (void)unused;char path[340],err[180]="";
+  snprintf(path,sizeof path,UPDATE_DATA_DIR "/update-" UPDATE_ASSET);
+  copy_text(U.phase,sizeof U.phase,"Verifying prepared update");U.done=0;U.progress_total=U.size;
+  IncrementalHooks hooks={NULL,rebuild_progress,NULL};
+  bool ok=incremental_verify(path,U.sha,(unsigned)U.size,&hooks);
+  if(!ok)copy_text(err,sizeof err,"The prepared update failed verification. Your current app is retained.");
   if (ok) {
     copy_text(U.phase, sizeof U.phase, "Saving verified update");
 #if UPDATE_VITA
@@ -569,19 +588,21 @@ static void *install_thread(void *arg) {
     if (ok) copy_text(U.installed, sizeof U.installed, target);
 #endif
   }
-  if (ok) { forget_file(patch); forget_file(path); }
+  if (ok) { char patch[380];snprintf(patch,sizeof patch,"%s.tupd.part",path);forget_file(patch);forget_file(path); }
   if (!ok) copy_text(U.error, sizeof U.error, err[0] ? err : "The update failed.");
   U.state = ok ? UPD_INSTALLED : UPD_FAILED;
-  U.thread_active = false;
   dbg_log("update %s: %s %s", U.version, ok ? "installed" : "failed", ok ? "" : U.error);
+  U.thread_active = false;
   return NULL;
 }
 
 void update_start(void) {
+  if(atomic_load(&U.quit))return;
   if ((U.state != UPD_AVAILABLE && !(U.state == UPD_FAILED && U.version[0])) || U.thread_active) return;
   U.done = 0;
   U.error[0] = 0;
   U.exit_requested = false;
+  atomic_store(&U.paused,false);
   U.state = UPD_DOWNLOADING;
   U.thread_active = true;
   if (!start_thread(install_thread, NULL)) {
@@ -590,6 +611,18 @@ void update_start(void) {
     U.state = UPD_FAILED;
   }
 }
+
+void update_install(void){
+  if(atomic_load(&U.quit))return;
+  if(U.thread_active||U.state!=UPD_READY)return;
+  atomic_store(&U.paused,false);
+  U.state=UPD_INSTALLING;U.thread_active=true;
+  if(!start_thread(commit_thread,NULL)){U.thread_active=false;U.state=UPD_READY;copy_text(U.error,sizeof U.error,"Could not start update installation.");}
+}
+void update_pause(bool paused){atomic_store(&U.paused,paused);}
+bool update_paused(void){return atomic_load(&U.paused);}
+long update_done_bytes(void){return U.done;}
+long update_total_bytes(void){return U.progress_total;}
 
 UpdateState update_state(void) { return U.state; }
 const char *update_version(void) { return U.version; }

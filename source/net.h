@@ -89,6 +89,7 @@ void send_room_mod(int op, u32 target, int length);
 void send_activity(const char *json);
 
 void send_music(const char *json);
+void send_furniture(const char *json);
 
 /* JSON game messages are bounded and transferred on the network thread. */
 bool net_fastfood_enable(bool enabled);

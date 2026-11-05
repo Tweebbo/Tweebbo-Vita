@@ -1,4 +1,5 @@
 #include "language.h"
+#include "gen/pet_commands.h"
 #include "client_pets.h"
 #include "client_ui.h"
 #include "pets.h"
@@ -12,7 +13,8 @@
 #include <string.h>
 
 enum { LIST, DETAIL, ADOPT, CONFIRM };
-enum { SELECT=4000, PAGE, BACK, NEW, SPECIES, BREED, COLOR, NAME, BUY, CONFIRM_BUY, COMMAND, PLACE, VISIT, REFRESH };
+enum { SELECT=4000, PAGE, BACK, NEW, SPECIES, BREED, COLOR, NAME, BUY, CONFIRM_BUY, COMMAND, PLACE, VISIT, REFRESH, TRICK_STEP, TRICK_DO };
+static int trick;
 static struct {int panel,page;u32 selected,revision;bool pending;u64 sent_at;Pet preview;char name[80],status[160];json_t *rows;} P;
 static int number(json_t *v,const char *k) {return (int)json_integer_value(json_object_get(v,k));}
 static const char *string(json_t *v,const char *k) {const char *s=json_string_value(json_object_get(v,k));return s?s:"";}
@@ -63,6 +65,12 @@ void client_pets_action(int command,int arg) {
       int x=me->x+dx,y=me->y+dy;if(empty(x,y)){send(json_pack("{s:s,s:i,s:i,s:i}","action","place","id",(int)P.selected,"x",x,"y",y));return;}
     }
     status("Move to an empty floor area first.");return;
+  }
+  if((command==TRICK_STEP||command==TRICK_DO)&&!strcmp(public_slug(room),public_slug(W.slug))){
+    int supported[32],count=0;int kind=number(pet,"kind");
+    for(int i=0;i<pet_command_count&&count<32;i++)if(pet_commands[i].kinds&(1<<kind))supported[count++]=i;
+    if(count){trick=(trick+count+(command==TRICK_STEP?arg:0))%count;if(command==TRICK_DO)send(json_pack("{s:s,s:i}","action",pet_commands[supported[trick]].action,"id",(int)P.selected));}
+    return;
   }
   if(command==COMMAND && !strcmp(public_slug(room),public_slug(W.slug))) {
     static const char *actions[]={"follow","stay","sit","sleep","play","feed","drink","pickup"};
@@ -127,5 +135,8 @@ void client_pets_draw(float x,float y,float w) {
   else {
     static const char *actions[]={"Follow","Stay","Sit","Sleep","Play","Feed","Water","Pick up"};
     for(int i=0;i<8;i++)client_ui_button(x+8+(i%4)*74,y+151+(i/4)*30,70,26,actions[i],ready?COMMAND:0,i);
+    int supported[32],count=0,kind=number(pet,"kind");
+    for(int i=0;i<pet_command_count&&count<32;i++)if(pet_commands[i].kinds&(1<<kind))supported[count++]=i;
+    if(count){trick=(trick+count)%count;client_ui_button(x+10,y+214,24,22,"<",ready?TRICK_STEP:0,-1);client_ui_button(x+40,y+214,w-80,22,TR(pet_commands[supported[trick]].label),ready?TRICK_DO:0,0);client_ui_button(x+w-34,y+214,24,22,">",ready?TRICK_STEP:0,1);}
   }
 }

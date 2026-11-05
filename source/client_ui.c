@@ -1,3 +1,4 @@
+#include "wired_clicks.h"
 #include "client_fastfood.h"
 #include "language.h"
 #include "gen/game_rooms.h"
@@ -16,6 +17,14 @@
 #include "client_bar.h"
 #include "client_identity.h"
 #include "client_music.h"
+#include "furniture.h"
+#include "client_furniture.h"
+#include "wired_services.h"
+#include "client_wired_services.h"
+#include "wired_boards.h"
+#include "client_wired_boards.h"
+#include "wired_chests.h"
+#include "client_wired_chests.h"
 #include "client_camera.h"
 #include "feedback.h"
 #include "doorbell.h"
@@ -38,7 +47,7 @@
 enum { CLOSED, ROOMS, CHAT, ME, DRESS, HELP, KEYBOARD, NEW_ROOM, PEOPLE, PERSON, CONFIRM, RIGHTS, MORE, SHOP, SOCIAL, GAMES, PETS, SETTINGS, LOCK_CONFIRM, TRADE, ACTIONS, CASINO, SNOW, POOL, BAR, IDENTITY, MUSIC, CHIPS, SUPPORT, UPDATE, DELETE_CONFIRM };
 enum { OPEN = 1, CLOSE, REFRESH, SCOPE, ENTER_ROOM, PAGE, WRITE, RENAME, CATEGORY,
        STYLE, COLOR, SAVE_LOOK, KEY, BACKSPACE, SHIFT, SPACE, SUBMIT, OFFLINE, RESUME, LOBBY,
-       PICK_STYLE, PICK_COLOR, SEARCH, CLEAR_SEARCH, MODEL, CREATE_ROOM, SELECT_PERSON, MODERATE, CONFIRM_MOD, SYMBOLS, REVOKE, UNBAN, OPEN_SHOP, REMOVE_LOCK, SAVE_LOCK, GESTURE, PUT_DRINK_AWAY, ACTIVITY_CONTEXT, GOTO_CASINO, PAY_CODE, UPDATE_LATER, UPDATE_INSTALL, UPDATE_CHECK, UPDATE_RESTART, UPDATE_CLOSE, CHECK_UPDATES, CHOOSE_LANGUAGE };
+       PICK_STYLE, PICK_COLOR, SEARCH, CLEAR_SEARCH, MODEL, CREATE_ROOM, SELECT_PERSON, MODERATE, CONFIRM_MOD, SYMBOLS, REVOKE, UNBAN, OPEN_SHOP, REMOVE_LOCK, SAVE_LOCK, GESTURE, PUT_DRINK_AWAY, ACTIVITY_CONTEXT, GOTO_CASINO, PAY_CODE, UPDATE_LATER, UPDATE_INSTALL, UPDATE_CHECK, UPDATE_RESTART, UPDATE_CLOSE, CHECK_UPDATES, CHOOSE_LANGUAGE, UPDATE_PAUSE };
 #ifdef TWEEBBO_LAN_ONLY
 #define RETURN_LABEL "Return to LAN hotel"
 #else
@@ -53,6 +62,11 @@ enum { DELETE_ROOM=99, ALERT_CLOSE=100 };
 #define FASTFOOD 34
 #define BATTLE 35
 #define LANGUAGE 36
+#define FURNITURE 38
+#define WIRED_SERVICES 39
+#define SERVICE_MENU 40
+#define WIRED_CHESTS 41
+#define WIRED_BOARDS 42
 typedef struct { float x, y, w, h; int cmd, arg; } Button;
 typedef struct { char slug[48], title[164], owner[40], label[128], icon[32]; int online, priority; bool locked, featured, credits, official; } Room;
 static struct {
@@ -71,7 +85,7 @@ static struct {
   int people_page, mod;
   int rights_page;
   Look look;
-  char error[128], input[8001], draft[256], status[128];
+  char error[128], input[8193], draft[256], status[128];
   size_t input_cap;
   char chat[160][96];
   int chat_n, chat_page, chat_pending;
@@ -515,15 +529,20 @@ static void update_draw(float x, float y, float w) {
     client_ui_paragraph(update_notes()[0] ? update_notes() : TR("Your character, rooms and purchases stay the same."), x + 12, y + 78, w - 24, 4, CL_INK);
     client_ui_paragraph(TR("Optional update. Keep playing and install later if you prefer."), x + 12, y + 150, w - 24, 2, CL_MUTED);
     button(x + 8, y + 188, 140, 26, TR("Later"), UPDATE_LATER, 0);
-    button(x + 156, y + 188, 146, 26, TR(update_full_fallback()?"Full download":update_small()?"Small update":"Update now"), UPDATE_INSTALL, 0);
-  } else if (st == UPD_DOWNLOADING) {
+    button(x + 156, y + 188, 146, 26, TR("Prepare / resume"), UPDATE_INSTALL, 0);
+  } else if (st == UPD_DOWNLOADING||st==UPD_INSTALLING) {
     int pct = (int)(update_progress() * 100);
-    snprintf(text, sizeof text, "%s... %d%%", TR(update_status()[0]?update_status():"Downloading update"), pct);
+    snprintf(text, sizeof text, "%s %d%%", update_paused()?TR("Update paused"):TR(update_status()[0]?update_status():"Downloading update"), pct);
     label(text, x + 12, y + 40, w - 24, CL_INK);
     fill_round(x + 12, y + 70, w - 24, 14, 7, color(CL_SHADE));
     if (pct > 0) fill_round(x + 12, y + 70, (w - 24) * pct / 100.0f, 14, 7, color(CL_ONLINE));
-    client_ui_paragraph(TR("Keep Tweebbo open. If the connection drops, the download resumes where it stopped."), x + 12, y + 102, w - 24, 3, CL_MUTED);
-    client_ui_paragraph(TR("The release is checked against its SHA-256 before installing."), x + 12, y + 150, w - 24, 2, CL_MUTED);
+    snprintf(text,sizeof text,TR("%.1f / %.1f MB"),update_done_bytes()/1000000.0,update_total_bytes()/1000000.0);label(text,x+12,y+96,w-24,CL_INK);
+    client_ui_paragraph(TR("The release is checked against its SHA-256 before installing."), x + 12, y + 120, w - 24, 3, CL_MUTED);
+    if(st==UPD_DOWNLOADING){button(x+8,y+188,140,26,TR("Keep playing"),UPDATE_CLOSE,0);button(x+156,y+188,146,26,update_paused()?TR("Resume"):TR("Pause"),UPDATE_PAUSE,0);}
+  } else if(st==UPD_READY){
+    label(TR("Update ready"),x+12,y+36,w-24,CL_INK);
+    client_ui_paragraph(TR("The update is ready. Keep playing and install when convenient. Reopen Tweebbo after installation."),x+12,y+66,w-24,5,CL_INK);
+    button(x+8,y+188,140,26,TR("Keep playing"),UPDATE_CLOSE,0);button(x+156,y+188,146,26,TR("Install now"),UPDATE_INSTALL,0);
   } else if (st == UPD_INSTALLED) {
 #if TWEEBBO_DEVICE == 3
     label(TR("Update downloaded"), x + 12, y + 36, w - 24, CL_INK);
@@ -623,6 +642,22 @@ void client_ui_capsule(float x,float y,float w,float h,const char *text) {
   text_draw(t,x+w/2,y+(h-14)/2,12,color(CL_INK),1);
 }
 void client_ui_label(const char *text,float x,float y,float width,u32 ink) {label(text,x,y,width,ink);}
+void client_ui_check(float x,float y,float s,bool on,bool enabled) {
+  float k=s/14.0f;
+  fill_round(x,y,s,s,3*k,color(enabled?0x5c7680:0xc9c4b6));
+  fill_round(x+k,y+k,s-2*k,s-2*k,2*k,color(on?0xe3f1dc:0xffffff));
+  if(!on)return;
+  u32 tick=color(enabled?0x3c7a2c:0x9a978d);
+  for(int i=0;i<3;i++)fill_rect(x+(3+i)*k,y+(6+i)*k,2*k,2*k,tick);
+  for(int i=0;i<6;i++)fill_rect(x+(5+i)*k,y+(9-i)*k,2*k,2*k,tick);
+}
+void client_ui_check_button(float x,float y,float w,float h,const char *text,bool on,int cmd,int arg) {
+  button(x,y,w,h,"",cmd,arg);
+  float s=fminf(h-8,16),bx=x+8,tx=bx+s+7;
+  client_ui_check(bx,y+(h-s)/2,s,on,cmd!=0);
+  char t[384]; copy(t,sizeof t,text); text_fit(t,12,x+w-8-tx);
+  text_draw(t,tx,y+(h-14)/2,12,color(cmd?CL_INK:0x9a978d),0);
+}
 bool client_ui_hot(float x,float y,float w,float h,int cmd,int arg) {int i=U.count;hotspot(x,y,w,h,cmd,arg);return cmd && U.panel && U.focus==i;}
 bool client_ui_icon_fit(const char *name,float cx,float cy,float box) {return ui_icon_fit(name,cx,cy,box);}
 u32 client_ui_rgb(u32 c) {return color(c);}
@@ -730,6 +765,9 @@ static void refresh(void) {
   if (!U.job) copy(U.error, sizeof U.error, "Could not request rooms. Try Refresh.");
 }
 static void open_panel(int panel) {
+  if(U.panel==WIRED_SERVICES&&panel!=WIRED_SERVICES&&panel!=KEYBOARD)wired_services_close();
+  if(U.panel==WIRED_BOARDS&&panel!=WIRED_BOARDS)wired_boards_close();
+  if(U.panel==WIRED_CHESTS&&panel!=WIRED_CHESTS&&panel!=KEYBOARD)wired_chests_close();
   if(panel!=FASTFOOD&&fastfood_active())fastfood_close();
   if(panel!=BATTLE&&battle_active())battle_close();
   if(U.panel==IDENTITY && panel!=KEYBOARD)client_identity_close();
@@ -769,6 +807,7 @@ void client_ui_fastfood(void){open_panel(FASTFOOD);}
 void client_ui_battle(void){open_panel(BATTLE);}
 void client_ui_snow(void){open_panel(SNOW);}
 void client_ui_close(void) {open_panel(CLOSED);}
+void client_ui_dress(void){open_panel(DRESS);}
 void client_ui_alert(const char *text) {
   if(!text || strlen(text)>8192)return;
   json_t *j=json_loads(text,JSON_REJECT_DUPLICATES,NULL);
@@ -795,6 +834,14 @@ void client_ui_inspect(u32 item) {
 void client_ui_edit(const char *title,const char *initial,bool (*submit_text)(const char *)) {
   client_ui_edit_draft(title,initial,submit_text,NULL);
 }
+void client_ui_edit_limit(const char *title,const char *initial,int characters,bool (*submit_text)(const char *)){
+  client_ui_edit(title,initial,submit_text);
+  size_t capacity=characters>0?(size_t)characters*4+1:1;
+  U.input_cap=capacity<sizeof U.input?capacity:sizeof U.input;
+}
+void client_ui_services(int kind){wired_services_open(kind);open_panel(WIRED_SERVICES);}
+void client_ui_boards(void){wired_boards_open();open_panel(WIRED_BOARDS);}
+void client_ui_wired_chest_event(void){if(wired_chest_panel.open){if(U.panel!=WIRED_CHESTS&&!(U.panel==KEYBOARD&&U.return_panel==WIRED_CHESTS))open_panel(WIRED_CHESTS);}else if(U.panel==WIRED_CHESTS)open_panel(CLOSED);}
 void client_ui_edit_draft(const char *title,const char *initial,bool (*submit_text)(const char *),void (*cancel)(const char *)) {
   U.secret=false;
   edit_text(EDIT_FEATURE);copy(U.edit_title,sizeof U.edit_title,title);copy(U.input,sizeof U.input,initial);U.edit_submit=submit_text;U.edit_cancel=cancel;
@@ -863,9 +910,16 @@ static void submit(void) {
   memset(U.input,0,sizeof U.input);
 }
 static void activate(int cmd, int arg) {
+  if(cmd==21000){wired_clicks_toggle();changed();return;}
   if(cmd==ALERT_CLOSE){U.alert=false;changed();return;}
   if(net_state()==NET_REPLACED && cmd!=RESUME)return;
   if(cmd==RESUME)U.alert=false;
+  if(cmd==20098){client_ui_boards();return;}
+  if(cmd>=20000&&cmd<20100){client_wired_boards_action(cmd,arg);return;}
+  if(cmd>=19000&&cmd<19100){client_wired_chests_action(cmd,arg);return;}
+  if(cmd==18098){client_ui_services(arg);return;}
+  if(cmd>=18000&&cmd<18100){client_wired_services_action(cmd,arg);return;}
+  if(cmd>=17000){client_furniture_action(cmd,arg);return;}
   if(cmd>=16000){client_battle_action(cmd,arg);return;}
   if(cmd>=15000){client_fastfood_action(cmd,arg);return;}
   if(cmd>=14000){if(cmd==14000)doorbell_ring();else if(cmd==14001)doorbell_answer(arg!=0);else if(cmd==14002)doorbell_set(!doorbell.enabled);changed();return;}
@@ -934,12 +988,13 @@ static void activate(int cmd, int arg) {
     case OPEN: open_panel(arg); break;
     case CHOOSE_LANGUAGE: tw_language_request(arg);break;
     case UPDATE_LATER: update_dismiss(); open_panel(CLOSED); break;
-    case UPDATE_INSTALL: update_start(); break;
+    case UPDATE_INSTALL: if(update_state()==UPD_READY)update_install();else update_start(); break;
+    case UPDATE_PAUSE: update_pause(!update_paused());break;
     case UPDATE_CHECK: update_check(); break;
     case UPDATE_RESTART: update_restart(); break;
     case UPDATE_CLOSE: update_dismiss(); open_panel(CLOSED); break;
     case CHECK_UPDATES:
-      if (update_state() != UPD_AVAILABLE && update_state() != UPD_DOWNLOADING &&
+      if (update_state() != UPD_AVAILABLE && update_state() != UPD_DOWNLOADING && update_state()!=UPD_READY && update_state()!=UPD_INSTALLING &&
           update_state() != UPD_INSTALLED && update_state() != UPD_CHECKING) update_check();
       open_panel(UPDATE);
       break;
@@ -950,6 +1005,8 @@ static void activate(int cmd, int arg) {
       else show_toast("The Casino needs the hotel connection.",now_ms());
       break;
     case CLOSE:
+      if(U.panel==WIRED_CHESTS&&wired_chest_panel.view!=WC_MAIN&&wired_chest_panel.view!=WC_RESULT){wired_chests_action(WC_BACK);changed();return;}
+      if(U.panel==WIRED_SERVICES&&wired_service_panel.view!=WS_LIST){wired_services_action(WS_BACK);changed();return;}
       if(U.panel==POOL){pool_leave();open_panel(CLOSED);return;}
       if(U.panel==SNOW){client_snow_close();return;}
       if(U.panel==TRADE)client_trade_close();
@@ -1140,7 +1197,10 @@ float client_ui_room_left(void) {
   return x+w+8;
 }
 void client_ui_reset(void) {
-  pool_room_changed();client_bar_reset();client_identity_reset();client_music_reset();
+  wired_chests_reset();
+  wired_services_reset();
+  wired_boards_reset();
+  pool_room_changed();client_bar_reset();client_identity_reset();client_music_reset();furniture_reset();
   client_snow_reset();
   fastfood_close();
   battle_close();
@@ -1158,7 +1218,14 @@ void client_ui_reset(void) {
   copy(U.server,sizeof U.server,net_server());
 }
 void client_ui_room(void) {
-  pool_room_changed();client_bar_reset();client_identity_reset();client_music_reset();
+  wired_clicks_reset();
+  wired_chests_reset();
+  if(U.panel==WIRED_CHESTS||(U.panel==KEYBOARD&&(U.return_panel==WIRED_CHESTS||U.return_panel==WIRED_SERVICES))){memset(U.input,0,sizeof U.input);open_panel(CLOSED);}
+  wired_services_reset();
+  wired_boards_reset();
+  if(U.panel==WIRED_BOARDS)open_panel(CLOSED);
+  if(U.panel==WIRED_SERVICES)open_panel(CLOSED);
+  furniture_reset();pool_room_changed();client_bar_reset();client_identity_reset();client_music_reset();
   if(U.panel==POOL||U.panel==BAR)open_panel(CLOSED);
   client_snow_reset();
   if(U.panel==FASTFOOD){fastfood_close();open_panel(CLOSED);}
@@ -1180,9 +1247,9 @@ void client_ui_room(void) {
   copy(U.chat_room,sizeof U.chat_room,W.slug);
   changed();
 }
-void client_ui_chat(u32 eid,const char *text) {
+void client_ui_chat_styled(u32 eid,const char *text,u8 flags) {
   Ent *e=world_ent(eid);
-  char message[600]; snprintf(message,sizeof message,"%s: %s",e ? e->name : "Hotel",text);
+  char message[2100]; snprintf(message,sizeof message,"%s%s%s",flags&2?"":e?e->name:"Hotel",flags&2?"":": ",text);
   const char *s=message;
   while(*s) {
     char line[96]={0}; size_t used=0;
@@ -1209,6 +1276,7 @@ void client_ui_update(void) {
   if(doorbell.guest&&doorbell.guest!=last_bell&&!U.panel){last_bell=doorbell.guest;open_panel(DOORBELL);}
   client_camera_update();
   client_identity_update();client_music_update();
+  if(furniture_panel.pending){furniture_panel.pending=false;open_panel(FURNITURE);}
   if(W.credits_up){W.credits_up=false;client_music_ui_sound("cash");}
   if(U.panel==CHIPS || U.panel==SUPPORT)paylink_poll(now_ms());
   update_poll(now_ms());
@@ -1395,6 +1463,7 @@ void client_ui_draw(void) {
     }
     if(kind>=0)button(margin+8,bar-28,302,24,context,ACTIVITY_CONTEXT,kind);
     classic_tools(margin,bar);
+    if(*furniture_arena_text()){client_ui_panel(margin+4,bar-64,SCREEN_W-2*margin-8,34);client_ui_label(furniture_arena_text(),margin+12,bar-56,SCREEN_W-98,0x18272a);if(furniture_can_throw())button(SCREEN_W-76,bar-60,68,24,TR("Throw"),17008,0);}
     if (!W.in_room) {
       button(SCREEN_W/2-130,SCREEN_H/2+72,124,24,TR("Rooms"),OPEN,ROOMS);
       button(SCREEN_W/2+6,SCREEN_H/2+72,124,24,TR("Help"),OPEN,HELP);
@@ -1420,6 +1489,11 @@ void client_ui_draw(void) {
   else if (U.panel==DOORBELL) title = "Doorbell";
   else if(U.panel==LANGUAGE)title=TR("Choose your language");
   else if(U.panel==GOPENGUIN)title="GoPenguin";
+  else if(U.panel==FURNITURE)title=furniture_panel.name;
+  else if(U.panel==WIRED_SERVICES)title=TR("Room services");
+  else if(U.panel==SERVICE_MENU)title=TR("Room services");
+  else if(U.panel==WIRED_BOARDS)title=TR("Room leaderboards");
+  else if(U.panel==WIRED_CHESTS)title=wired_chest_panel.view==WC_NETWORK_DETAIL?wired_chest_panel.title:TR(wired_chest_panel.title);
   else title = TR(titles[U.panel]);
   window_chrome(x,y,w,h,title,true);
   char line[384];
@@ -1435,8 +1509,22 @@ void client_ui_draw(void) {
     static const int args[]={PEOPLE,SHOP_CATALOGUE,SHOP_INVENTORY,SHOP_ROOM,SOCIAL,GAMES,PETS,HELP,SUPPORT,GOPENGUIN,SNOW,MUSIC};
     const float cell=(w-16)/3;
     for(int i=0;i<COUNT(names);i++)button(x+8+(i%3)*cell,y+28+(i/3)*34,cell-3,28,TR(names[i]),commands[i],args[i]);
-    if(W.room_owner)button(x+8,y+174,w-16,28,TR("Room settings"),OPEN,SETTINGS);
+    if(W.room_owner)button(x+8,y+174,(w-24)/2,28,TR("Room settings"),OPEN,SETTINGS);
+    button(W.room_owner?x+w/2+4:x+8,y+174,W.room_owner?(w-24)/2:w-16,28,"Room services",OPEN,SERVICE_MENU);
   }
+  else if(U.panel==SERVICE_MENU){
+    float half=(w-26)/2;
+    button(x+10,y+42,half,28,"Room bots",net_online()?18098:0,WS_BOTS);
+    button(x+16+half,y+42,half,28,"Groups",net_online()?18098:0,WS_GROUPS);
+    button(x+10,y+88,half,28,"Quests",net_online()?18098:0,WS_QUESTS);
+    button(x+16+half,y+88,half,28,"Leaderboards",net_online()?20098:0,0);
+    client_ui_paragraph("Open a chest or contract in the room to configure it.",x+12,y+136,w-24,2,CL_INK);
+    button(x+10,y+182,86,26,"Back",OPEN,MORE);
+    if(world_can_decorate()&&wired_clicks_active())button(x+104,y+182,w-114,26,wired_clicks_ignored()?"Apply Wired clicks":"Ignore Wired clicks",21000,0);
+  }
+  else if(U.panel==WIRED_SERVICES)client_wired_services_draw(x,y,w,h);
+  else if(U.panel==WIRED_BOARDS)client_wired_boards_draw(x,y,w,h);
+  else if(U.panel==WIRED_CHESTS)client_wired_chests_draw(x,y,w,h);
   else if(U.panel==GOPENGUIN){
     client_ui_paragraph(TR("GoPenguin is available! Explore the island on your computer or phone."),x+12,y+38,w-24,4,CL_INK);
     label("gopenguin.lol",x+12,y+100,w-24,CL_INK);
@@ -1489,6 +1577,7 @@ void client_ui_draw(void) {
   else if(U.panel==BAR)client_bar_draw(x,y,w);
   else if(U.panel==IDENTITY)client_identity_draw(x,y,w);
   else if(U.panel==MUSIC)client_music_draw(x,y,w);
+  else if(U.panel==FURNITURE)client_furniture_draw(x,y,w,h);
   else if(U.panel==CAMERA)client_camera_draw(x,y,w,h);
   else if(U.panel==FEEDBACK) {
     label(TR("Send an idea or report a problem."),x+10,y+29,w-20,0x26373a);
@@ -1793,3 +1882,5 @@ bool client_ui_tap(float x,float y) {
   if(U.panel==SHOP && client_shop_building() && x>=client_ui_room_left() && y<SCREEN_H-32-(U.tv?16:0))return false;
   return U.panel || y>=SCREEN_H-32-(U.tv?16:0);
 }
+
+void client_ui_chat(u32 eid,const char *text){client_ui_chat_styled(eid,text,0);}

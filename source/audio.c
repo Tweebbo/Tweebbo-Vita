@@ -1,4 +1,5 @@
 #include "audio.h"
+#include "official_music_limits.h"
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,7 +15,7 @@ void audio_mix(s16 *out,int frames){
     for(int c=0;c<14;c++){
       if(!voices[c].data||!voices[c].n)continue;
       size_t index=voices[c].cursor/48000;
-      if(index>=voices[c].n){if(voices[c].loop){voices[c].cursor%=voices[c].n*48000;index=voices[c].cursor/48000;}else continue;}
+      if(index>=voices[c].n){if(voices[c].loop){voices[c].cursor%=(u64)voices[c].n*48000;index=voices[c].cursor/48000;}else continue;}
       sum+=voices[c].data[index]/3;voices[c].cursor+=voices[c].rate;
     }
     if(sum>32767)sum=32767;
@@ -26,10 +27,11 @@ void audio_mix(s16 *out,int frames){
 void audio_stop(int c){if(c<0||c>=14)return;pthread_mutex_lock(&mu);free(voices[c].data);memset(&voices[c],0,sizeof voices[c]);pthread_mutex_unlock(&mu);}
 void audio_clear(void){for(int c=0;c<14;c++)audio_stop(c);}
 bool audio_play(int c,const void *data,size_t n,int bits,int rate,bool loop,size_t skip){
-  if(c<0||c>=14||!data||!n||n>512*1024||skip>=n||(bits!=8&&bits!=16)||rate<8000||rate>48000)return false;
+  bool official=c==12&&bits==8&&rate==16000&&n==OFFICIAL_MUSIC_BYTES;
+  if(c<0||c>=14||!data||!n||(n>512*1024&&!official)||skip>=n||(bits!=8&&bits!=16)||rate<8000||rate>48000)return false;
   s16 *copy=malloc(n*sizeof *copy);if(!copy)return false;
   if(bits==16)memcpy(copy,data,n*2);else for(size_t i=0;i<n;i++)copy[i]=(s16)((const s8*)data)[i]*256;
-  pthread_mutex_lock(&mu);free(voices[c].data);voices[c].data=copy;voices[c].n=n;voices[c].cursor=skip*48000;voices[c].rate=rate;voices[c].loop=loop;pthread_mutex_unlock(&mu);return true;
+  pthread_mutex_lock(&mu);free(voices[c].data);voices[c].data=copy;voices[c].n=n;voices[c].cursor=(u64)skip*48000;voices[c].rate=rate;voices[c].loop=loop;pthread_mutex_unlock(&mu);return true;
 }
 bool audio_busy(int c){if(c<0||c>=14)return false;pthread_mutex_lock(&mu);bool busy=voices[c].data&&(voices[c].loop||voices[c].cursor/48000<voices[c].n);pthread_mutex_unlock(&mu);return busy;}
 void audio_mute(bool value){pthread_mutex_lock(&mu);muted=value;pthread_mutex_unlock(&mu);}

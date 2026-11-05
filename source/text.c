@@ -20,8 +20,9 @@ static unsigned utf8_next(const char **text) {
   return c;
 }
 
-static const FontGlyph *glyph(unsigned code, int size) {
-  if (code > 0xffff) return NULL;
+/** Binary search of the bitmap font; ASCII results are memoized per size because text is
+ *  measured and drawn glyph by glyph every frame (labels, fitting, paragraph wrapping). */
+static const FontGlyph *glyph_search(unsigned code, int size) {
   int lo = 0, hi = font_glyph_count - 1;
   unsigned key = (unsigned)size << 16 | code;
   while (lo <= hi) {
@@ -31,7 +32,33 @@ static const FontGlyph *glyph(unsigned code, int size) {
     if (key == k) return g;
     if (k < key) lo = mid + 1; else hi = mid - 1;
   }
+  return NULL;
+}
+
+#define GLYPH_SIZES 17
+static const FontGlyph *ascii_glyphs[GLYPH_SIZES][128];
+static bool ascii_ready[GLYPH_SIZES];
+
+static const FontGlyph *glyph(unsigned code, int size) {
+  if (code > 0xffff) return NULL;
+  if (code < 128 && size >= 0 && size < GLYPH_SIZES) {
+    if (!ascii_ready[size]) {
+      for (unsigned c = 0; c < 128; c++) ascii_glyphs[size][c] = glyph_search(c, size);
+      ascii_ready[size] = true;
+    }
+    if (ascii_glyphs[size][code]) return ascii_glyphs[size][code];
+  } else {
+    const FontGlyph *g = glyph_search(code, size);
+    if (g) return g;
+  }
   return (tw_language()==TW_ZH||tw_language()==TW_JA)?tw_cjk_glyph(code):NULL;
+}
+
+/** Width of one code point as bitmap_width counts it (missing glyphs measure as '?'). */
+static float advance(unsigned code, int size) {
+  const FontGlyph *g = glyph(code, size);
+  if (!g) g = glyph('?', size);
+  return g ? g->advance : 0;
 }
 
 static float bitmap_width(const char *s, int size) {
@@ -68,16 +95,21 @@ float text_width(const char *s, float size) {
   return width < 0 ? 0 : width;
 }
 
+/** One pass: the longest whole-character prefix whose width plus the ellipsis fits. Same
+ *  result as trimming and re-measuring each prefix, which was quadratic per label per frame. */
 void text_fit(char *s, float size, float max) {
-  if (text_width(s, size) <= max) return;
-  int original = (int)strlen(s), n = original;
-  if (original < 3 || text_width("…", size) > max) { s[0] = 0; return; }
-  while (n > 0) {
-    n--;
-    while (n > 0 && ((u8)s[n] & 0xC0) == 0x80) n--;
-    if (n + 3 > original) continue;
-    memcpy(s + n, "\xE2\x80\xA6", 4);
-    if (text_width(s, size) <= max) return;
+  int px = bitmap_size(size), original = (int)strlen(s);
+  if (bitmap_width(s, px) <= max) return;
+  float dots = bitmap_width("…", px);
+  if (original < 3 || dots > max) { s[0] = 0; return; }
+  const char *p = s;
+  int best = -1;
+  float width = 0;
+  while (*p) {
+    int at = (int)(p - s);
+    if (at + 3 <= original && width + dots <= max) best = at;
+    width += advance(utf8_next(&p), px);
   }
-  s[0] = 0;
+  if (best < 0) { s[0] = 0; return; }
+  memcpy(s + best, "\xE2\x80\xA6", 4);
 }

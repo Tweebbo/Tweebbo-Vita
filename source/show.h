@@ -36,3 +36,5 @@ bool show_quit_requested(void);
 
 float show_zoom(void);
 void show_to_screen(float wx,float wy,float *x,float *y);
+
+void show_chat_styled(u32 eid,const char *text,u64 now,s8 width,u8 flags);

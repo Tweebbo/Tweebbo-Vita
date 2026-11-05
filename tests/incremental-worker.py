@@ -8,6 +8,7 @@ import struct
 import subprocess
 import tempfile
 import threading
+import time
 import zlib
 from pathlib import Path
 
@@ -25,7 +26,13 @@ results = []
 scenarios = ['legacy', 'small-success', 'small-interrupted', 'small-base-missing', 'small-base-damaged',
              'small-header', 'small-checksum', 'small-trailing', 'unknown-base', 'untrusted-patch',
              'bad-manifest-hash', 'bad-manifest-identity', 'bad-full-url', 'bad-version', 'prerelease',
-             'wrong-full-hash', 'write-fail', 'rename-fail', 'rename-no-backup', 'small-rename-retry']
+             'wrong-full-hash', 'write-fail', 'rename-fail', 'rename-no-backup', 'small-rename-retry',
+             'cancel-paused', 'cancel-stalled', 'cancel-check']
+selection = os.environ.get('PORTABLE_UPDATE_SCENARIOS')
+if selection:
+    scenarios = [name for name in scenarios if name in selection.split(',')]
+    if not scenarios:
+        raise ValueError('No requested updater scenario exists')
 
 for device in [2, 3]:
     binary = build / ('worker-' + str(device))
@@ -63,7 +70,7 @@ for device in [2, 3]:
             if scenario == 'small-header':
                 recipe = b'BAD' + recipe[3:]
             patch = zlib.compress(recipe, 9) + (b'extra bytes' if scenario == 'small-trailing' else b'')
-            state = {'full': 0, 'patch': 0, 'ranges': [], 'manifest': 0}
+            state = {'full': 0, 'patch': 0, 'ranges': [], 'fullRanges': [], 'manifest': 0}
             files = {}
 
             class Handler(http.server.BaseHTTPRequestHandler):
@@ -77,6 +84,7 @@ for device in [2, 3]:
                     blob = files[self.path]
                     if self.path == '/full.' + suffix:
                         state['full'] += 1
+                        state['fullRanges'].append(self.headers.get('Range'))
                     if self.path == '/patch.tupd':
                         state['patch'] += 1
                         state['ranges'].append(self.headers.get('Range'))
@@ -88,7 +96,16 @@ for device in [2, 3]:
                     if start:
                         self.send_header('Content-Range', f'bytes {start}-{len(blob)-1}/{len(blob)}')
                     self.end_headers()
-                    if self.path == '/patch.tupd' and scenario == 'small-interrupted' and state['patch'] == 1:
+                    if self.path=='/release' and scenario=='cancel-check':
+                        self.wfile.write(blob[:4]);self.wfile.flush();time.sleep(1)
+                    elif self.path == '/full.'+suffix and scenario.startswith('cancel-') and state['full']==1:
+                        try:
+                            for at in range(start,len(blob),8192):
+                                self.wfile.write(blob[at:at+8192]);self.wfile.flush()
+                                time.sleep(1 if scenario=='cancel-stalled' else .01)
+                        except (BrokenPipeError,ConnectionResetError):
+                            pass
+                    elif self.path == '/patch.tupd' and scenario == 'small-interrupted' and state['patch'] == 1:
                         self.wfile.write(blob[:800])
                         self.wfile.flush()
                         self.close_connection = True
@@ -103,7 +120,7 @@ for device in [2, 3]:
                                          {'url': origin + '/patch.tupd', 'bytes': len(patch), 'sha256': sha(patch)}}]}
             if scenario == 'unknown-base':
                 manifest['incremental'][0]['from'] = '1.4.2'
-            if scenario in ['write-fail', 'rename-fail', 'rename-no-backup']:
+            if scenario in ['write-fail', 'rename-fail', 'rename-no-backup', 'cancel-paused', 'cancel-stalled']:
                 manifest['incremental'][0]['from'] = '1.4.2'
             if scenario == 'untrusted-patch':
                 manifest['incremental'][0][suffix]['url'] = 'https://untrusted.example/app.tupd'
@@ -151,6 +168,13 @@ for device in [2, 3]:
                         child.stdin.write('\n'); child.stdin.flush()
                 code = child.wait(timeout=45)
                 assert code == 0, (device, scenario, lines, child.stderr.read())
+                if scenario in ['cancel-paused','cancel-stalled']:
+                    partial=root/('update/update-tweebbo.'+suffix)
+                    assert 0<partial.stat().st_size<len(payload)
+                    assert (root/('target.nro' if device==2 else 'update/tweebbo.vpk')).read_bytes()==old
+                    resumed=subprocess.run([str(binary),'resume-cancel'],cwd=root,env=env,capture_output=True,text=True,timeout=45)
+                    assert resumed.returncode==0,(device,scenario,resumed.stderr)
+                    assert any(value and not value.startswith('bytes=0-') for value in state['fullRanges'])
                 if scenario == 'small-interrupted':
                     assert state['patch'] == 2 and any(value and not value.startswith('bytes=0-') for value in state['ranges'])
                 if scenario == 'small-success':
@@ -162,5 +186,5 @@ for device in [2, 3]:
                 server.shutdown();server.server_close();thread.join()
             print('PASS', suffix, scenario, flush=True)
 
-(build / 'report.json').write_text(json.dumps({'status': 'PASS', 'cases': results, 'count': len(results)}, indent=2) + '\n')
+(build / ('report-selected.json' if selection else 'report.json')).write_text(json.dumps({'status': 'PASS', 'cases': results, 'count': len(results)}, indent=2) + '\n')
 print('PASS portable production updater:', len(results), 'real HTTP, resume, integrity, explicit fallback and atomic replacement cases')

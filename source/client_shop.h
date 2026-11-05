@@ -23,5 +23,5 @@ bool client_shop_building(void);
 bool client_shop_move(int dx, int dy);
 bool client_shop_key(int action);
 void client_shop_tile(int x, int y);
-typedef struct { bool on, wall, ok; u16 def; int x, y, rot, z; u32 ignore; } BuildGhost;
+typedef struct { bool on, wall, ok; u8 z_fine; u16 def; int x, y, rot, z; u32 ignore; } BuildGhost;
 const BuildGhost *client_shop_ghost(void);

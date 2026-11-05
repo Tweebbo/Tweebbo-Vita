@@ -30,6 +30,10 @@ float client_ui_key_hint(const char *key, const char *text, float x, float y, u3
 /** The room's contextual prompt, drawn as a classic button.b capsule ending at `right`. */
 void client_ui_prompt(const char *key, const char *text, float right, float y);
 void client_ui_label(const char *text, float x, float y, float width, u32 ink);
+/** Classic checkbox (s pixels square) with a tick when `on`. */
+void client_ui_check(float x,float y,float s,bool on,bool enabled);
+/** Capsule button whose label is preceded by a checkbox (furniture/player pickers). */
+void client_ui_check_button(float x,float y,float w,float h,const char *text,bool on,int cmd,int arg);
 /** Registers a pad/touch hotspot without drawing it; returns whether it has the pad focus. */
 bool client_ui_hot(float x, float y, float w, float h, int cmd, int arg);
 /** Classic graphic (ui_sprites) shrunk to fit a `box` square centred on (cx, cy). */
@@ -43,10 +47,15 @@ void client_ui_arrow(float x, float y, float w, float h, const char *glyph, int 
 void client_ui_changed(void);
 void client_ui_inspect(u32 item);
 void client_ui_close(void);
+void client_ui_dress(void);
 void client_ui_alert(const char *json);
 void client_ui_casino(void);
 /* Return false to keep the draft open when a request could not be queued. */
 void client_ui_edit(const char *title, const char *initial, bool (*submit)(const char *));
+void client_ui_edit_limit(const char *title,const char *initial,int characters,bool (*submit)(const char *));
+void client_ui_services(int kind);
+void client_ui_boards(void);
+void client_ui_wired_chest_event(void);
 void client_ui_edit_draft(const char *title,const char *initial,bool (*submit)(const char *),void (*cancel)(const char *));
 size_t client_ui_paragraph(const char *text, float x, float y, float width, int lines, u32 ink);
 
@@ -64,3 +73,5 @@ void client_ui_support(void);
 void client_ui_fastfood(void);
 void client_ui_battle(void);
 void client_ui_snow(void);
+
+void client_ui_chat_styled(u32 eid,const char *text,u8 flags);

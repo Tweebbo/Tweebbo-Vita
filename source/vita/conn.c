@@ -29,6 +29,7 @@
 struct Conn {
   int fd;
   bool tls;
+  ConnCancel cancel;
 #ifndef NO_TLS
   mbedtls_ssl_context ssl;
 #endif
@@ -49,6 +50,7 @@ static pthread_mutex_t tls_lock = PTHREAD_MUTEX_INITIALIZER;
 #define TLS_UNLOCK() pthread_mutex_unlock(&tls_lock)
 static bool sockets_ready;
 bool conn_ready(void) { return sockets_ready; }
+bool conn_cancelled(const ConnCancel *cancel){return cancel&&cancel->requested&&cancel->requested(cancel->user);}
 
 bool endpoint_parse(const char *url, Endpoint *out) {
   memset(out, 0, sizeof *out);
@@ -173,8 +175,9 @@ Conn *conn_open_download(const Endpoint *ep, int timeout_ms, char *err, int err_
   return conn_open(ep, timeout_ms, err, err_cap);
 }
 
-Conn *conn_open(const Endpoint *ep, int timeout_ms, char *err, int err_cap) {
+static Conn *open_connection(const Endpoint *ep, int timeout_ms, char *err, int err_cap,const ConnCancel *cancel) {
   err[0] = 0;
+  if(conn_cancelled(cancel)){snprintf(err,(size_t)err_cap,"Download stopped.");return NULL;}
   char port[8];
   snprintf(port, sizeof port, "%d", ep->port);
   struct addrinfo hints = {.ai_family = AF_INET, .ai_socktype = SOCK_STREAM}, *res = NULL;
@@ -184,8 +187,19 @@ Conn *conn_open(const Endpoint *ep, int timeout_ms, char *err, int err_cap) {
   }
   int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
   if (fd < 0) { freeaddrinfo(res); snprintf(err, (size_t)err_cap, "No network (socket error %d).", errno); return NULL; }
-  // Blocking connect: the network thread can wait; drawing continues on the main thread.
+  if(cancel&&fcntl(fd,F_SETFL,fcntl(fd,F_GETFL,0)|O_NONBLOCK)<0){freeaddrinfo(res);close(fd);snprintf(err,(size_t)err_cap,"Could not configure the download socket.");return NULL;}
+  // The game keeps its existing connect path; updater connects can stop during shutdown.
   int r = connect(fd, res->ai_addr, res->ai_addrlen);
+  if(cancel&&r<0&&would_block()){
+    u64 until=now_ms()+(u64)(timeout_ms>0?timeout_ms:0);
+    while(!conn_cancelled(cancel)&&now_ms()<until){
+      if(!wait_fd(fd,POLLOUT,50))continue;
+      int error=0;socklen_t length=sizeof error;
+      if(getsockopt(fd,SOL_SOCKET,SO_ERROR,&error,&length)<0)break;
+      if(error)errno=error;else r=0;break;
+    }
+    if(r<0)errno=conn_cancelled(cancel)?ECANCELED:ETIMEDOUT;
+  }
   freeaddrinfo(res);
   if (r < 0) {
     int e = errno;
@@ -204,8 +218,10 @@ Conn *conn_open(const Endpoint *ep, int timeout_ms, char *err, int err_cap) {
   }
 #endif
   Conn *c = calloc(1, sizeof *c);
+  if(!c){close(fd);snprintf(err,(size_t)err_cap,"Not enough memory for the connection.");return NULL;}
   c->fd = fd;
   c->tls = ep->tls;
+  if(cancel)c->cancel=*cancel;
   if (!c->tls) return c;
 #ifndef NO_TLS
   mbedtls_ssl_init(&c->ssl);
@@ -217,6 +233,7 @@ Conn *conn_open(const Endpoint *ep, int timeout_ms, char *err, int err_cap) {
   mbedtls_ssl_set_bio(&c->ssl, c, bio_send, bio_recv, NULL);
   int spent = 0;
   for (;;) {
+    if(conn_cancelled(&c->cancel)){conn_close(c);return NULL;}
     r = mbedtls_ssl_handshake(&c->ssl);
     if (!r) break;
     if ((r != MBEDTLS_ERR_SSL_WANT_READ && r != MBEDTLS_ERR_SSL_WANT_WRITE) || spent > timeout_ms) {
@@ -237,6 +254,9 @@ Conn *conn_open(const Endpoint *ep, int timeout_ms, char *err, int err_cap) {
 #endif
 }
 
+Conn *conn_open(const Endpoint *ep,int timeout_ms,char *err,int err_cap){return open_connection(ep,timeout_ms,err,err_cap,NULL);}
+Conn *conn_open_cancel(const Endpoint *ep,int timeout_ms,char *err,int err_cap,const ConnCancel *cancel){return open_connection(ep,timeout_ms,err,err_cap,cancel);}
+
 void conn_close(Conn *c) {
   if (!c) return;
 #ifndef NO_TLS
@@ -253,6 +273,7 @@ bool conn_write(Conn *c, const void *data, int len, int timeout_ms) {
   const u8 *p = data;
   int spent = 0;
   while (len > 0) {
+    if(conn_cancelled(&c->cancel))return false;
     int n;
 #ifndef NO_TLS
     if (c->tls) {
@@ -278,6 +299,7 @@ bool conn_write(Conn *c, const void *data, int len, int timeout_ms) {
 }
 
 int conn_read(Conn *c, void *buf, int cap, int timeout_ms) {
+  if(conn_cancelled(&c->cancel))return -1;
 #ifndef NO_TLS
   if (c->tls && mbedtls_ssl_get_bytes_avail(&c->ssl) == 0 && !wait_fd(c->fd, POLLIN, timeout_ms)) return 0;
   if (c->tls) {

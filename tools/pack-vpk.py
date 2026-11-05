@@ -28,6 +28,7 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as zf:
         for path in sorted(glob.glob(f"romfs/{game}/*")):
             zf.write(path, game + "/" + os.path.basename(path))
     zf.write("romfs/furni.pak", "furni.pak")
+    zf.write("romfs/fxpeople.pak", "fxpeople.pak")
     for path in sorted(glob.glob("romfs/lang/*")):
         zf.write(path, "lang/" + os.path.basename(path))
     for path in sorted(glob.glob("romfs/ui/*")):

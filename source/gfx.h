@@ -4,6 +4,8 @@
 // Colors are ABGR (0xAABBGGRR), like citro2d and vita2d.
 #pragma once
 #include "assets.h"
+#include "avatar_effects.h"
+bool gfx_avatar_effect(u64 key,u16 effect,const AvatarFxDraw *parts,unsigned count,bool mirrored,float x,float y,float scale,u8 alpha);
 bool gfx_battle_load(int arena);
 void gfx_battle_free(void);
 void gfx_battle_blend(int mode);
@@ -17,6 +19,8 @@ void gfx_battle_sprite(unsigned id,float x,float y,float kx,float ky,u32 color,f
 #define SCREEN_H 360
 #endif
 
+void gfx_modulate(u32 color);
+void gfx_highlight(int kind,u32 rgb,int strength);
 bool gfx_init(void);
 void gfx_exit(void);
 /** Frame brackets: clear and present (the platform owns the renderer). */

@@ -1,6 +1,7 @@
 #include "language.h"
 #include "client_music.h"
 #include "gen/classic_music.h"
+#include "official_music.h"
 #include "client_ui.h"
 #include "audio.h"
 #include "assets.h"
@@ -20,12 +21,13 @@
 #define RATE 16000
 #define SLOT_MS 2000
 typedef struct {u16 sample,start;} Clip;
-typedef struct {char provider[12],id[24],title[80];int duration,slots;u8 clip_n[4];Clip clips[4][MAX_CLIPS];} Track;
+typedef struct {char provider[12],id[24],title[80];u32 disc;int duration,slots;u8 clip_n[4];Clip clips[4][MAX_CLIPS];} Track;
 typedef struct {u32 id;char title[80];} SavedSong;
 static struct {
  bool known,playing,listening,classic_on; s64 offset,started,position;u64 revision,heard_key;
- u32 active,machine;int index,track_n,song_n,page,clip_on[4];
+ u32 active,machine,inventory_revision;int index,track_n,song_n,disc_n,page,clip_on[4];
  Track tracks[MAX_TRACKS];SavedSong songs[MAX_SONGS];
+ MusicDiscGroup discs[MUSIC_DISC_GROUPS];
  int job,sample_id;char server[128];bool requested;
 } M={.listening=true};
 static struct {int id;u8 *data;size_t n;u64 stamp;bool failed;} cache[32];
@@ -40,6 +42,7 @@ static void read_track(json_t *v, Track *t) {
   copy(t->id, sizeof t->id, json_string_value(json_object_get(v, "id")));
   copy(t->title, sizeof t->title, json_string_value(json_object_get(v, "title")));
   t->duration = num(v, "duration");
+  t->disc=(u32)json_integer_value(json_object_get(v,"disc"));
   json_t *song = json_object_get(v, "song");
   t->slots = num(song, "slots");
   size_t c; json_t *channel;
@@ -116,6 +119,8 @@ void client_music_receive(const char *text, u64 now) {
     M.songs[M.song_n].id = (u32)strtoul(k, NULL, 10);
     copy(M.songs[M.song_n++].title, sizeof M.songs[0].title, json_string_value(json_object_get(v, "title")));
   }
+  json_t *discs=json_object_get(j,"owned_discs");if(!json_is_array(discs))discs=json_object_get(st,"owned_discs");
+  M.disc_n=official_music_groups(discs,M.discs);
   json_decref(j);
 }
 
@@ -141,7 +146,7 @@ static void command(const char *op, const char *extra) {
 
 static void silence(void){for(int c=0;c<4;c++){audio_stop(8+c);M.clip_on[c]=-1;}audio_stop(CLASSIC_CHANNEL);M.classic_on=false;M.heard_key=0;}
 void client_music_reset(void){
-  silence();M.known=M.playing=M.requested=false;M.active=M.machine=0;M.track_n=M.song_n=M.page=0;
+  silence();M.known=M.playing=M.requested=false;M.active=M.machine=0;M.track_n=M.song_n=M.disc_n=M.page=0;
 }
 static int cached(int id){for(int i=0;i<32;i++)if(cache[i].id==id){cache[i].stamp=now_ms();return i;}return -1;}
 static void want(int id){
@@ -153,25 +158,27 @@ static void sample_result(void){
   HttpResult r;if(!M.job||!net_http_result(M.job,&r))return;M.job=0;
   int slot=0;for(int i=0;i<32;i++)if(!cache[i].id){slot=i;break;}else if(cache[i].stamp<cache[slot].stamp)slot=i;
   cache_bytes-=cache[slot].n;free(cache[slot].data);memset(&cache[slot],0,sizeof cache[slot]);cache[slot].id=M.sample_id;cache[slot].stamp=now_ms();
-  if(r.status==200&&r.body&&r.len>0&&r.len<=512*1024){cache[slot].data=(u8*)r.body;cache[slot].n=r.len;cache_bytes+=r.len;r.body=NULL;}
+  size_t limit=M.sample_id==OFFICIAL_MUSIC_SAMPLE?OFFICIAL_MUSIC_BYTES:512*1024;
+  if(r.status==200&&r.body&&r.len>0&&r.len<=limit&&(M.sample_id!=OFFICIAL_MUSIC_SAMPLE||r.len==OFFICIAL_MUSIC_BYTES)){cache[slot].data=(u8*)r.body;cache[slot].n=r.len;cache_bytes+=r.len;r.body=NULL;}
   else cache[slot].failed=true;
   free(r.body);
   while(cache_bytes>8*1024*1024){int old=-1;for(int i=0;i<32;i++)if(i!=slot&&cache[i].n&&(old<0||cache[i].stamp<cache[old].stamp))old=i;if(old<0)break;cache_bytes-=cache[old].n;free(cache[old].data);memset(&cache[old],0,sizeof cache[old]);}
 }
 void client_music_update(void){
+  if(M.known&&M.machine&&M.inventory_revision!=W.inv_rev){M.inventory_revision=W.inv_rev;send_music("{\"op\":\"sync\"}");}
   if(strcmp(M.server,net_server())){
     client_music_reset();M.job=0;snprintf(M.server,sizeof M.server,"%s",net_server());
     for(int i=0;i<32;i++){free(cache[i].data);memset(&cache[i],0,sizeof cache[i]);}cache_bytes=0;
   }
   sample_result();
   if(!net_online()||!M.known||!M.playing||!M.listening||!M.active||M.index<0||M.index>=M.track_n){if(M.heard_key)silence();return;}
-  Track *t=&M.tracks[M.index];bool classic=!strcmp(t->provider,"classic");
+  Track *t=&M.tracks[M.index];bool classic=!strcmp(t->provider,"classic")||official_music_sample(t->provider,t->id);
   if(!classic&&strcmp(t->provider,"trax")){if(M.heard_key)silence();return;}
   u64 key=M.revision*64+(u64)M.index+1;
   if(key!=M.heard_key){silence();M.heard_key=key;}
   s64 elapsed=M.position+(s64)now_ms()+M.offset-M.started;if(elapsed<0)elapsed=0;
   if(classic){
-    int id=CLASSIC_BASE+atoi(t->id);want(id);int at=cached(id);
+    int id=official_music_sample(t->provider,t->id);if(!id)id=CLASSIC_BASE+atoi(t->id);want(id);int at=cached(id);
     if(!M.classic_on&&at>=0&&cache[at].data){
       size_t skip=(size_t)(elapsed*RATE/1000);if(skip<cache[at].n)M.classic_on=audio_play(CLASSIC_CHANNEL,cache[at].data,cache[at].n,8,RATE,false,skip);
     }
@@ -195,7 +202,7 @@ void client_music_update(void){
     }
   }
 }
-enum { SYNC=11000, MUTE, LISTEN, PLAY, PAUSE, NEXT, PAGE, ADD, ADD_CLASSIC };
+enum { SYNC=11000, MUTE, LISTEN, PLAY, PAUSE, NEXT, PAGE, ADD, ADD_CLASSIC, ADD_DISC, REMOVE_DISC };
 void client_music_action(int cmd,int arg){
   if(cmd==MUTE){audio_mute(!audio_muted());store_save("audio-muted",audio_muted()?"1":"0");return;}
   if(cmd==LISTEN){M.listening=!M.listening;if(!M.listening)silence();return;}
@@ -208,6 +215,8 @@ void client_music_action(int cmd,int arg){
   if(cmd==NEXT)command("next",NULL);
   if(cmd==ADD&&arg>=0&&arg<M.song_n){char extra[40];snprintf(extra,sizeof extra,"\"song\":%u",M.songs[arg].id);command("add_song",extra);}
   if(cmd==ADD_CLASSIC&&arg>=0&&arg<CLASSIC_TRACK_COUNT){char extra[32];snprintf(extra,sizeof extra,"\"set\":%u",(unsigned)classic_tracks[arg].id);command("add_classic",extra);}
+  if(cmd==ADD_DISC&&arg>=0&&arg<M.disc_n){char extra[32];snprintf(extra,sizeof extra,"\"disc\":%u",(unsigned)M.discs[arg].item);command("add_disc",extra);}
+  if(cmd==REMOVE_DISC&&arg>=0&&arg<M.track_n&&M.tracks[arg].disc){const Item *machine=world_item(M.machine);if(machine&&machine->owner==W.guest_id){char extra[32];snprintf(extra,sizeof extra,"\"index\":%d",arg);command("remove",extra);}}
 }
 void client_music_draw(float x,float y,float w){
   if(!M.requested&&net_online()){send_music("{\"op\":\"sync\"}");M.requested=true;}
@@ -215,21 +224,26 @@ void client_music_draw(float x,float y,float w){
   const Item *machine=world_item(M.machine);
   bool control=net_online()&&machine&&world_can_arrange(machine);
   client_ui_label(t?t->title:TR("Room playlist"),x+10,y+30,w-20,0x18272a);
-  client_ui_label(t&&!strcmp(t->provider,"classic")?TR("Kepler Classic music plays on this console."):t&&strcmp(t->provider,"trax")?TR("This provider plays on PC / phones."):M.job?TR("Loading Trax samples..."):!net_online()?TR("Connect to use the room playlist."):TR("Original Trax samples play on this console."),x+10,y+48,w-20,0x18272a);
+  client_ui_label(t&&official_music_sample(t->provider,t->id)?TR("Original music discs play on this console."):t&&!strcmp(t->provider,"classic")?TR("Kepler Classic music plays on this console."):t&&strcmp(t->provider,"trax")?TR("This provider plays on PC / phones."):M.job?TR("Loading Trax samples..."):!net_online()?TR("Connect to use the room playlist."):TR("Original Trax samples play on this console."),x+10,y+48,w-20,0x18272a);
   client_ui_button(x+8,y+72,144,24,audio_muted()?TR("Sound: muted"):TR("Sound: on"),MUTE,0);
   client_ui_button(x+158,y+72,144,24,M.listening?TR("Mute room music"):TR("Listen to music"),LISTEN,0);
   client_ui_button(x+8,y+102,94,24,M.playing?TR("Pause"):TR("Play"),control&&M.track_n?(M.playing?PAUSE:PLAY):0,M.index>=0&&M.index<M.track_n?M.index:0);
   client_ui_button(x+108,y+102,90,24,TR("Next track"),control&&M.track_n?NEXT:0,0);
   client_ui_button(x+208,y+102,94,24,TR("Refresh"),net_online()?SYNC:0,0);
-  int count=M.track_n+M.song_n+CLASSIC_TRACK_COUNT;if(M.page*2>=count)M.page=0;
+  int classic_base=M.track_n+M.song_n+M.disc_n;
+  int count=classic_base+CLASSIC_TRACK_COUNT;if(M.page*2>=count)M.page=0;
   for(int row=0;row<2&&M.page*2+row<count;row++){
     int i=M.page*2+row;char label[110];
     if(i<M.track_n)snprintf(label,sizeof label,"Play: %s",M.tracks[i].title);
     else if(i<M.track_n+M.song_n)snprintf(label,sizeof label,"Add: %s",M.songs[i-M.track_n].title);
-    else snprintf(label,sizeof label,"Classic: %s",classic_tracks[i-M.track_n-M.song_n].name);
+    else if(i<classic_base)snprintf(label,sizeof label,"Disc: %s (x%u)",M.discs[i-M.track_n-M.song_n].title,(unsigned)M.discs[i-M.track_n-M.song_n].count);
+    else snprintf(label,sizeof label,"Classic: %s",classic_tracks[i-classic_base].name);
     int cmd=i<M.track_n?PLAY:ADD,arg=i<M.track_n?i:i-M.track_n;
-    if(i>=M.track_n+M.song_n){cmd=ADD_CLASSIC;arg=i-M.track_n-M.song_n;}
-    client_ui_button(x+8,y+135+row*28,w-16,25,label,control?cmd:0,arg);
+    if(i>=M.track_n+M.song_n){cmd=ADD_DISC;arg=i-M.track_n-M.song_n;}
+    if(i>=classic_base){cmd=ADD_CLASSIC;arg=i-classic_base;}
+    bool own=machine&&machine->owner==W.guest_id;
+    if(i<M.track_n&&M.tracks[i].disc){client_ui_button(x+8,y+135+row*28,w-76,25,label,control?cmd:0,arg);client_ui_button(x+w-64,y+135+row*28,56,25,TR("Remove"),control&&own?REMOVE_DISC:0,i);}
+    else client_ui_button(x+8,y+135+row*28,w-16,25,label,control&&(cmd!=ADD_DISC||own)?cmd:0,arg);
   }
   client_ui_button(x+8,y+193,140,23,TR("Previous"),M.page?PAGE:0,-1);client_ui_button(x+156,y+193,146,23,TR("Next page"),(M.page+1)*2<count?PAGE:0,1);
 }

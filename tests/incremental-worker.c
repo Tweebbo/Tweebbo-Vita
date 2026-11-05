@@ -38,13 +38,24 @@ static bool same(const char *a, const char *b) {
 }
 static void wait_worker(void) {
   u64 until = now_ms() + 30000;
-  while (update_state() == UPD_CHECKING || update_state() == UPD_DOWNLOADING) { assert(now_ms()<until); usleep(1000); }
+  while (update_state() == UPD_CHECKING || update_state() == UPD_DOWNLOADING||update_state()==UPD_INSTALLING) { assert(now_ms()<until); usleep(1000); }
   /* Publication of state precedes the detached thread's final bookkeeping. */
   usleep(30000);
 }
+static void commit_ready(void){
+  if(update_state()!=UPD_READY)return;
+  const char *old=getenv("TWEEBBO_UPDATE_TARGET");if(!old)old="update/tweebbo.vpk";
+  assert(same(old,"previous.bin"));
+  update_install();wait_worker();
+}
 int main(int argc, char **argv) {
   assert(argc==2);scenario=argv[1];char error[128];assert(conn_global_init(error,sizeof error));
-  update_check();wait_worker();
+  update_check();
+  if(!strcmp(scenario,"cancel-check")){
+    usleep(100000);u64 start=now_ms();update_shutdown();assert(now_ms()-start<1000);
+    assert(same("target.nro","previous.bin"));conn_global_exit();puts("PASS stalled manifest cancellation");return 0;
+  }
+  wait_worker();
   if (!strcmp(scenario,"bad-full-url") || !strcmp(scenario,"bad-version") || !strcmp(scenario,"prerelease")) {
     assert(update_state()==UPD_FAILED);assert(same("target.nro","previous.bin"));puts("PASS rejected offer");return 0;
   }
@@ -53,17 +64,27 @@ int main(int argc, char **argv) {
   assert(update_small()==small);assert(update_full_bytes()>0);
   if(small)assert(update_download_bytes()<update_full_bytes());
   update_dismiss();assert(update_dismissed());update_forget_dismiss();
-  update_start();wait_worker();
+  update_start();
+  if(!strcmp(scenario,"cancel-paused")||!strcmp(scenario,"cancel-stalled")){
+    u64 until=now_ms()+5000;while(update_done_bytes()==0&&update_state()==UPD_DOWNLOADING){assert(now_ms()<until);usleep(1000);}
+    assert(update_state()==UPD_DOWNLOADING&&update_done_bytes()>0);
+    if(!strcmp(scenario,"cancel-paused"))update_pause(true);
+    usleep(50000);u64 start=now_ms();update_shutdown();assert(now_ms()-start<1000);
+    const char *installed=getenv("TWEEBBO_UPDATE_TARGET");if(!installed)installed="update/tweebbo.vpk";
+    assert(same(installed,"previous.bin"));assert(same("userdata/session.txt","saved-session.txt"));
+    conn_global_exit();puts("PASS cancellation retains partial and current app");return 0;
+  }
+  wait_worker();commit_ready();
   bool fallback = !strcmp(scenario,"small-base-missing") || !strcmp(scenario,"small-base-damaged") ||
                   !strcmp(scenario,"small-header") || !strcmp(scenario,"small-checksum") || !strcmp(scenario,"small-trailing");
   if(fallback){
     assert(update_state()==UPD_FAILED && update_full_fallback());assert(strstr(update_error(),"Full download"));
     assert(same("target.nro","previous.bin"));puts("WAIT_FULL");fflush(stdout);assert(getchar()=='\n');
-    update_start();wait_worker();
+    update_start();wait_worker();commit_ready();
   }
   if(!strcmp(scenario,"rename-fail") || !strcmp(scenario,"small-rename-retry")){
     assert(update_state()==UPD_FAILED);const char *old=getenv("TWEEBBO_UPDATE_TARGET");if(!old)old="update/tweebbo.vpk";
-    assert(same(old,"previous.bin"));puts("WAIT_RETRY");fflush(stdout);assert(getchar()=='\n');update_start();wait_worker();
+    assert(same(old,"previous.bin"));puts("WAIT_RETRY");fflush(stdout);assert(getchar()=='\n');update_start();wait_worker();commit_ready();
   }
   if(!strcmp(scenario,"write-fail") || !strcmp(scenario,"wrong-full-hash") || !strcmp(scenario,"rename-no-backup")) {
     assert(update_state()==UPD_FAILED);const char *old=getenv("TWEEBBO_UPDATE_TARGET");if(!old)old="update/tweebbo.vpk";
@@ -73,5 +94,5 @@ int main(int argc, char **argv) {
     assert(update_state()==UPD_INSTALLED);assert(same(update_installed_path(),"payload.bin"));
   }
   assert(same("userdata/session.txt","saved-session.txt"));
-  conn_global_exit();puts("PASS updater worker");return 0;
+  update_shutdown();conn_global_exit();puts("PASS updater worker");return 0;
 }
