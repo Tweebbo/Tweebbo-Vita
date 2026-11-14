@@ -1,6 +1,7 @@
 // Shared room renderer and input routing for Switch and Vita.
 #pragma once
 #include "common.h"
+#include "walk_pad.h"
 
 /** Set by the platform main (used by the banner and the quick chat). */
 void show_set_platform(const char *name, const char *hello);
@@ -27,6 +28,8 @@ enum { SHOW_A = 1, SHOW_B, SHOW_X, SHOW_Y, SHOW_L, SHOW_R, SHOW_OFFLINE, SHOW_ZL
 void show_action(int action);
 /** One step in a direction (dx and dy in -1..1). */
 void show_walk(int dx, int dy);
+/** Physical pad: ax/ay normalised (-1..1, y up), dpad a mask of WALK_PAD_*; walks or navigates. */
+void show_walk_pad(float ax, float ay, unsigned dpad, u64 now);
 /** Canvas tap: walks to the tapped tile (touch or pointer). */
 void show_tap(float x, float y);
 /** Plus / START pressed: true on the second press within 3 s, else asks for it with a toast. */

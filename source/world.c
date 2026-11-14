@@ -114,6 +114,16 @@ bool world_walkable_tile(int x,int y){
   if(world_tile(x,y))return true;
   const Item *item=world_item_at(x,y);return item&&def_height_helper(def_get(item->def))==2;
 }
+bool world_walk_passable(int x,int y,bool goal){
+  if(!world_walkable_tile(x,y))return false;
+  Item *it=world_item_at(x,y);
+  const FurniDef *d=it?def_get(it->def):NULL;
+  if(!d)return true;
+  if(d->kind==KIND_FLOOR)return true;
+  if(d->flags&DEF_GATE)return it->state>0;
+  if(d->kind==KIND_SIT||(d->flags&(DEF_LAY|DEF_TELEPORTER)))return goal;
+  return false;
+}
 
 bool world_supports_items(const Item *item) {
   const FurniDef *d=def_get(item->def);if(!d||d->kind==KIND_WALL||def_height_helper(d)||!d->seat)return false;

@@ -2,11 +2,16 @@
 #include "common.h"
 
 void client_ui_init(void);
+const char *client_ui_stability_activity(unsigned *panel);
 void client_ui_update(void);
 void client_ui_draw(void);
 bool client_ui_animation_active(void);
 bool client_ui_action(int action);
 bool client_ui_move(int dx, int dy);
+/** True when client_ui_move would consume the pad: a panel, an alert or a replaced session. */
+bool client_ui_pad_active(void);
+/** Marks the last input as coming from the pad, so the hints show button glyphs. */
+void client_ui_pad_input(void);
 bool client_ui_tap(float x, float y);
 void client_ui_chat(u32 eid, const char *text);
 void client_ui_room(void);

@@ -6,6 +6,7 @@ static u32 wired_focus_user,wired_focus_item;
 #include "battle.h"
 // Shared room renderer for the Switch and Vita clients.
 #include "show.h"
+#include "input_repeat.h"
 #include "update.h"
 #include "language.h"
 #include "furniture.h"
@@ -877,6 +878,52 @@ void show_walk(int dx, int dy) {
   if (!me || !W.in_room || (dx == 0 && dy == 0)) return;
   int x = me->x + dx, y = me->y + dy;
   if (world_walkable_tile(x, y)) send_walk(x, y);
+}
+
+// The single-tile thresholds stay exact: Switch 12000/32767, Vita 48/128.
+#if defined(TWEEBBO_DEVICE) && TWEEBBO_DEVICE == 3
+#define SHOW_UI_STICK (48.0f / 128.0f)
+#else
+#define SHOW_UI_STICK (12000.0f / 32767.0f)
+#endif
+
+static WalkPad room_pad;
+static InputRepeat ui_repeat;
+
+static bool walk_pad_pass(void *ctx, int x, int y, bool goal) {
+  (void)ctx;
+  return world_walk_passable(x, y, goal);
+}
+
+static void walk_pad_send(void *ctx, int x, int y) {
+  (void)ctx;
+  send_walk(x, y);
+}
+
+void show_walk_pad(float ax, float ay, unsigned dpad, u64 now) {
+  int dx = 0, dy = 0;
+  if (dpad & WALK_PAD_UP) dy = -1;
+  else if (dpad & WALK_PAD_DOWN) dy = 1;
+  else if (dpad & WALK_PAD_LEFT) dx = -1;
+  else if (dpad & WALK_PAD_RIGHT) dx = 1;
+  else if (ax > SHOW_UI_STICK) dx = 1;
+  else if (ax < -SHOW_UI_STICK) dx = -1;
+  else if (ay > SHOW_UI_STICK) dy = -1;
+  else if (ay < -SHOW_UI_STICK) dy = 1;
+
+  int mode = pool_mode();
+  if (client_ui_pad_active() || mode == 2) {
+    if (!input_repeat(&ui_repeat, dx, dy, now, mode == 2 ? 80 : 180)) return;
+    show_walk(dx, dy);
+    return;
+  }
+
+  Ent *me = world_ent(W.me);
+  if (dx || dy || ax * ax + ay * ay >= WALK_PAD_LEAVE * WALK_PAD_LEAVE) net_activity();
+  if (dx || dy) client_ui_pad_input();
+  if (!me || !W.in_room) return;
+  WalkPadPos pos = {me->x, me->y, me->next_x, me->next_y};
+  walk_pad_step(&room_pad, ax, ay, dpad, &pos, now, walk_pad_pass, walk_pad_send, NULL);
 }
 
 typedef struct { u32 person, furniture; } RoomTarget;

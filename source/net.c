@@ -7,6 +7,7 @@
 #include "sim.h"
 #include "world.h"
 #include "job_signal.h"
+#include "stability_client.h"
 
 #ifdef __3DS__
 #include <3ds.h>
@@ -121,6 +122,13 @@ static struct {
   bool replaced;
   bool idle;
 } N;
+
+bool net_stability_send(const u8 *data,int len){
+ if(!N.started||N.offline||len<1||len>2049)return false;
+ lock(&N.mu);
+ bool ok=N.state==NET_ONLINE&&N.out.count<64&&N.out.bytes<65536&&q_push(&N.out,data,len);
+ unlock(&N.mu);return ok;
+}
 
 bool net_cancelled(void) {
   lock(&N.mu);
@@ -446,6 +454,7 @@ void net_send(const u8 *data, int len) {
 }
 
 void net_update(u64 now) {
+  stability_client_tick(now);
   if (N.offline) { sim_update(now); return; }
   const char *reception = tw_reception_slug();
   lock(&N.mu);

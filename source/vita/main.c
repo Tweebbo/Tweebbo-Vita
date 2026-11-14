@@ -20,8 +20,8 @@
 #include "client_ui.h"
 #include "world.h"
 #include "update.h"
-#include "input_repeat.h"
 #include "frame_pacing.h"
+#include "stability_client.h"
 
 #ifdef TWEEBBO_GAMES_TEST
 #if !TWEEBBO_LAN_ONLY
@@ -102,7 +102,6 @@ void store_save(const char *key, const char *value) {
 
 /** Left stick, D-pad and buttons. One walk step per press with a short repeat. */
 static void input(SceCtrlData *pad, unsigned prev, bool *running) {
-  static InputRepeat repeat;
   u64 now = now_ms();
   unsigned down = pad->buttons & ~prev;
 
@@ -121,17 +120,12 @@ static void input(SceCtrlData *pad, unsigned prev, bool *running) {
   rstick = r;
   if ((down & SCE_CTRL_START) && show_confirm_quit("START", now_ms())) *running = false;
 
-  int dx = 0, dy = 0;
-  if (pad->buttons & SCE_CTRL_UP) dy = -1;
-  else if (pad->buttons & SCE_CTRL_DOWN) dy = 1;
-  else if (pad->buttons & SCE_CTRL_LEFT) dx = -1;
-  else if (pad->buttons & SCE_CTRL_RIGHT) dx = 1;
-  else if (pad->lx > 128 + 48) dx = 1;
-  else if (pad->lx < 128 - 48) dx = -1;
-  else if (pad->ly > 128 + 48) dy = 1;
-  else if (pad->ly < 128 - 48) dy = -1;
-  if (!input_repeat(&repeat, dx, dy, now, pool_mode()==2 ? 80 : 180)) return;
-  show_walk(dx, dy);
+  unsigned dpad = 0;
+  if (pad->buttons & SCE_CTRL_UP) dpad |= WALK_PAD_UP;
+  if (pad->buttons & SCE_CTRL_DOWN) dpad |= WALK_PAD_DOWN;
+  if (pad->buttons & SCE_CTRL_LEFT) dpad |= WALK_PAD_LEFT;
+  if (pad->buttons & SCE_CTRL_RIGHT) dpad |= WALK_PAD_RIGHT;
+  show_walk_pad((pad->lx - 128) / 128.0f, (128 - pad->ly) / 128.0f, dpad, now);
 }
 
 int main(void) {
@@ -228,6 +222,7 @@ int main(void) {
   }
 
   update_shutdown();
+  stability_client_close();
   net_stop();
   conn_global_exit();
   gfx_exit();

@@ -426,7 +426,7 @@ static void book(float x, float y, float w, float h) {
   book_offer_n=page_offers(book_offers,COUNT(book_offers));
   float gy=iy+head_h+6,strip_y=ib-50;
   if(pg&&!strcmp(pg->id,"60")){
-    client_ui_paragraph(TR("Donate $5.00 USD or more for Tweebbo Club for life, Club and VIP badges and extra credits. Review the amount before paying."),mx,gy,mw,6,INK);
+    client_ui_paragraph(TR("Donate $9.99 USD or more for Tweebbo Club for life, Club and VIP badges and extra credits. Review the amount before paying."),mx,gy,mw,6,INK);
     client_ui_button(mx,ib-42,mw,28,TR("Get Tweebbo Club"),JOIN_CLUB,0);return;
   }
   if(!book_offer_n) {

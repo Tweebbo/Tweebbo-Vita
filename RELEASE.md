@@ -1,14 +1,13 @@
-# Tweebbo for PlayStation Vita 1.4.11
+# Tweebbo for PlayStation Vita 1.4.14
 
-Room building, Battle Banzai and Freeze. This update connects to the public hotel at tweebbo.lol.
+The Friends Console reads like a chat. This update connects to the public hotel at tweebbo.lol.
 
-- 335 catalogue additions include Banzai and Freeze equipment, thirteen construction helpers, Wired furniture, trophies, gifts and changing rooms.
-- Build arenas with team gates, tiles, scoreboards, counters and auxiliary objects. Banzai supports team captures and round achievements; Freeze includes shields and powers.
-- Configure Wired variables, selectors, character controls, movement, chests, contracts, links, labels, leaderboards and quest controls.
-- Precise heights, readable room labels, visible selection ticks and translated settings are included.
-- Repaired furniture uses its original artwork. Effects also apply to custom penguin characters. The Habbowood music disc joins the existing room music.
-- Prepare an update while playing, pause or resume its download, then choose when to install it. Smaller downloads are available for supported recent versions.
+- Friend requests come first, then your chats with faces, unread counts and the latest message.
+- Conversations show day separators, message bubbles and times. Remove friend and Ignore are in the conversation menu.
+- Automatic reactions: lol, haha, <3, gg or hi in chat play the matching gesture. Type :reactions off to turn them off.
+- After five minutes without playing, your character closes its eyes and shows AFK. Type :away and a short text to set your own tag.
+- Updated translations in Spanish, French, Japanese, Portuguese and Chinese.
 
 Saved characters, rooms, credits, pets and furniture are kept. Keep your saved identity files or recovery code. Restart Tweebbo after installing the update.
 
-See the [full changelog](https://tweebbo.lol/changelog). Automated and emulator checks are recorded separately from physical-console acceptance, which remains pending.
+Automated host tests and package checks passed; physical-console acceptance remains pending.

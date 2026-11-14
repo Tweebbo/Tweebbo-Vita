@@ -9,6 +9,7 @@ TITLE_ID ?= TWEE00001
 APP_NAME ?= Tweebbo
 
 APP_VERSION := $(shell cat VERSION)
+STABILITY_DIAGNOSTICS ?= 0
 # Vita's two-component metadata stores 1.4.1 as 01.41; the in-game updater uses VERSION.
 SFO_VERSION := $(shell awk -F. '{printf "%02d.%02d", $$1, $$2 * 10 + $$3}' VERSION)
 # The hotel the client plays on (set by build.sh: tweebbo.lol, or a LAN hotel for showcases).
@@ -22,6 +23,7 @@ ifeq ($(TWEEBBO_LAN_ONLY),1)
 CFLAGS  += -DTWEEBBO_LAN_ONLY=1
 endif
 LDFLAGS := -Wl,-q -Wl,--gc-sections
+CFLAGS += -DSTABILITY_DIAGNOSTICS=$(STABILITY_DIAGNOSTICS)
 LDFLAGS += -Wl,--wrap=sceGxmShaderPatcherCreateFragmentProgram -Wl,--wrap=sceGxmSetFragmentProgram
 
 BUILD ?= build
@@ -54,7 +56,7 @@ $(BUILD)/main.o: tools/emu/games-exercise.h
 
 # Test instrumentation must not survive a normal build.
 $(BUILD)/server.stamp: FORCE | $(BUILD)
-	@echo '$(TWEEBBO_SERVER) $(TWEEBBO_LAN_ONLY) $(EXTRA_CFLAGS)' | cmp -s - $@ || echo '$(TWEEBBO_SERVER) $(TWEEBBO_LAN_ONLY) $(EXTRA_CFLAGS)' > $@
+	@echo '$(TWEEBBO_SERVER) $(TWEEBBO_LAN_ONLY) $(EXTRA_CFLAGS) $(STABILITY_DIAGNOSTICS)' | cmp -s - $@ || echo '$(TWEEBBO_SERVER) $(TWEEBBO_LAN_ONLY) $(EXTRA_CFLAGS) $(STABILITY_DIAGNOSTICS)' > $@
 
 $(BUILD)/%.o: source/%.c $(BUILD)/server.stamp | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@

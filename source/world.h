@@ -112,6 +112,8 @@ bool world_placement_height100(u16 def,int x,int y,int rot,u32 ignore,int stack_
 typedef struct {u32 height100;u64 helper_cells;} WorldPlacement;
 bool world_placement(u16 def,int x,int y,int rot,u32 ignore,int stack_mode,WorldPlacement *placement);
 bool world_walkable_tile(int x,int y);
+/** Pad walking: floors pass, gates need state, seats/beds/teleporters only as the goal. */
+bool world_walk_passable(int x,int y,bool goal);
 bool world_supports_items(const Item *item);
 Ent *world_ent(u32 id);
 bool world_club_member(void);

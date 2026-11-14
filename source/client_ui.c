@@ -98,6 +98,7 @@ static struct {
   bool (*edit_submit)(const char *);
   void (*edit_cancel)(const char *);
 } U;
+const char *client_ui_stability_activity(unsigned *panel){*panel=(unsigned)U.panel;return U.panel==SNOW?"snowstorm":U.panel==FASTFOOD?"fastfood":U.panel==BATTLE?"battleball":U.panel==CASINO?"casino":U.panel==CLOSED?"room":"menu";}
 static float para(const char *text,float x,float y,float width,int lines,u32 ink);
 static int rooms_per_page(void);
 static void panel_rect(float *x,float *y,float *w,float *h);
@@ -609,15 +610,15 @@ static void chips_draw(float x, float y, float w) {
   pay_qr(qx + 44, y + 74, 80);
   pay_footer(x, y, w, qx, 1);
 }
-/** Support Tweebbo: the $5 donation (Tweebbo Club for life), paid with a phone. */
+/** Support Tweebbo: the $9.99 donation (Tweebbo Club for life), paid with a phone. */
 static void support_draw(float x, float y, float w) {
   float tx = x + 12, tw = w - 118, qx = x + w - 100, ty = y + 30;
   Ent *me = world_ent(W.me);
   bool member = me && (me->flags & FLAG_CLUB);
   label(member ? TR("You are a Club member. Thank you!") : TR("Keep the hotel open"), tx, ty, tw, member ? CL_ONLINE : 0x6b4a00); ty += 18;
-  ty += para("Donate $5.00 or more for these benefits:", tx, ty, tw, 2, CL_INK);
-  static const char *perks[] = {"- Tweebbo Club for life", "- VIP badge", "- 100 credits for hanging out", "- 10,000 credits the first time"};
-  for (int i = 0; i < 4; i++) ty += para(perks[i], tx, ty, tw, 1, CL_INK);
+  ty += para(TR("Donate $9.99 or more for these benefits:"), tx, ty, tw, 2, CL_INK);
+  static const char *perks[] = {"- Tweebbo Club for life", "- VIP badge", "- 100 credits for hanging out", "- 10,000 credits the first time", "- GoPenguin membership when linked"};
+  for (int i = 0; i < 5; i++) ty += para(TR(perks[i]), tx, ty, tw, 1, CL_INK);
   pay_qr(qx + 44, y + 74, 80);
   pay_footer(x, y, w, qx, 0);
 }
@@ -1526,10 +1527,16 @@ void client_ui_draw(void) {
   else if(U.panel==WIRED_BOARDS)client_wired_boards_draw(x,y,w,h);
   else if(U.panel==WIRED_CHESTS)client_wired_chests_draw(x,y,w,h);
   else if(U.panel==GOPENGUIN){
-    client_ui_paragraph(TR("GoPenguin is available! Explore the island on your computer or phone."),x+12,y+38,w-24,4,CL_INK);
-    label("gopenguin.lol",x+12,y+100,w-24,CL_INK);
-    client_ui_paragraph(TR("Tweebbo stays right here. Your hotel character and belongings are kept."),x+12,y+128,w-24,3,CL_INK);
-    button(x+8,y+184,w-16,28,TR("Back"),OPEN,MORE);
+    // Linking uses the GoPenguin web's own restore path with this character's private code;
+    // after that, Tweebbo Club for life and GoPenguin membership are shared by the servers.
+    float ty=y+34;
+    ty+=para(TR("GoPenguin is available! Explore the island on your computer or phone."),x+12,ty,w-24,2,CL_INK);
+    label("gopenguin.lol",x+12,ty+2,w-24,CL_INK);ty+=24;
+    ty+=para(TR("To link this character, open gopenguin.lol, then Manage account > Use another character > Enter an access code, and type your character code."),x+12,ty,w-24,4,CL_INK);
+    para(TR("Tweebbo Club for life and GoPenguin membership are then shared."),x+12,ty+2,w-24,2,CL_ONLINE);
+    float half=(w-24)/2;
+    button(x+8,y+184,half,28,TR("Badges / character code"),OPEN,IDENTITY);
+    button(x+16+half,y+184,half,28,TR("Back"),OPEN,MORE);
   }
   else if(U.panel==SETTINGS) {
     bool owner=W.room_owner && net_online() && !strcmp(U.settings_room,W.slug);
@@ -1850,6 +1857,8 @@ bool client_ui_action(int action) {
   if(action==SHOW_A && U.count) { Button b=U.buttons[U.focus];activate(b.cmd,b.arg); }
   return action!=SHOW_OFFLINE;
 }
+bool client_ui_pad_active(void) { return U.panel != CLOSED || U.alert || net_state()==NET_REPLACED; }
+void client_ui_pad_input(void) { U.pad=true; }
 bool client_ui_move(int dx,int dy) {
   if(dx||dy)U.pad=true;
   if(net_state()==NET_REPLACED || U.alert)return true;
